@@ -92,6 +92,7 @@ class QuotaWidget
     static DispatcherTimer zoomPaintTimer;
     static DateTime zoomPaintUntil;
     static bool settingsOpen;
+    static bool pinIcons = true;
     static Window settingsWindow;
     static System.Windows.Controls.Primitives.Popup welcomePopup;
     static void ConfigureSegments() {
@@ -157,9 +158,15 @@ class QuotaWidget
     static void ApplyScaleLayout() {
         bool mini = zoom < 0.8;
         bool compact = !expanded || mini;
+        foreach (string name in new[] { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" }) {
+            var icon = (Viewbox)Control<Button>(name).Content;
+            icon.Width = icon.Height = 13 / Math.Max(1,zoom);
+        }
+        bool showIcons = pinIcons || expanded;
+        Control<Grid>("Toolbar").Visibility = showIcons ? Visibility.Visible : Visibility.Collapsed;
         // Compact rows leave one pixel after the final time bar; expanded rows do not.
         Control<Grid>("Toolbar").Margin = new Thickness(0,compact ? -1 : 0,0,0);
-        Control<Grid>("LayoutRoot").RowDefinitions[1].Height = new GridLength(compact ? 16 : 17);
+        Control<Grid>("LayoutRoot").RowDefinitions[1].Height = new GridLength(showIcons ? (compact ? 16 : 17) : 0);
         Control<StackPanel>("Details").Visibility = expanded && !mini ? Visibility.Visible : Visibility.Collapsed;
         Control<Grid>("Compact").Visibility = expanded && !mini ? Visibility.Collapsed : Visibility.Visible;
         foreach (string prefix in new[] { "Hour", "Week" }) {
@@ -170,6 +177,19 @@ class QuotaWidget
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
+    static string ToolbarPreferenceFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "toolbar.txt"); }
+    static void LoadToolbarPreference() {
+        try { pinIcons = !File.Exists(ToolbarPreferenceFile()) || File.ReadAllText(ToolbarPreferenceFile()).Trim() != "hide"; }
+        catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+    static void SetPinnedIcons(bool value) {
+        pinIcons = value; Render();
+        if (checking) return;
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(ToolbarPreferenceFile()));
+            File.WriteAllText(ToolbarPreferenceFile(),pinIcons ? "pin" : "hide");
+        } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
     static void SelectLanguage(bool value) { english = value; ApplyLanguage(); SaveLanguage(); }
     static string WelcomeFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "settings-tip-v1.txt"); }
     static void DismissWelcome(bool remember) {
@@ -227,6 +247,7 @@ class QuotaWidget
         scaleRow.Children.Add(slider); Grid.SetColumn(input,1); scaleRow.Children.Add(input); Grid.SetColumn(percent,2); scaleRow.Children.Add(percent); panel.Children.Add(scaleRow);
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,14), Foreground = Brushes.LightSlateGray }; panel.Children.Add(note);
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
+        var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var done = new Button { Padding = new Thickness(10,5,10,5), IsCancel = true };
         actions.Children.Add(done); panel.Children.Add(actions);
@@ -235,9 +256,12 @@ class QuotaWidget
             scaleLabel.Text = Text("缩放比例", "Scale");
             note.Text = Text("40%–150% · 支持滚轮缩放。低于 80% 时仅显示条形和按钮。修改自动保存。", "40%–150% · Mouse wheel supported. Below 80%, only bars and buttons are shown. Changes save automatically.");
             colors.Content = Text("配色设置…", "Colors…"); done.Content = Text("完成", "Done");
+            toolbarOption.Content = Text("收起时保留底部按钮", "Keep bottom buttons when collapsed");
         };
         labels();
         language.SelectionChanged += (s,e) => { SelectLanguage(language.SelectedIndex == 1); labels(); };
+        toolbarOption.Checked += (s,e) => SetPinnedIcons(true);
+        toolbarOption.Unchecked += (s,e) => SetPinnedIcons(false);
         slider.ValueChanged += (s,e) => { SetZoom(slider.Value / 100); input.Text = (zoom * 100).ToString("0",CultureInfo.InvariantCulture); input.ClearValue(System.Windows.Controls.Control.BorderBrushProperty); };
         Action commit = () => {
             double value;
@@ -254,6 +278,10 @@ class QuotaWidget
         try {
             if (checking) {
                 double before = zoom; bool wasEnglish = english;
+                bool previousPin = pinIcons;
+                toolbarOption.IsChecked = !previousPin;
+                if (pinIcons == previousPin) throw new Exception("Toolbar setting did not update.");
+                toolbarOption.IsChecked = previousPin;
                 slider.Value = 40;
                 if (zoom != 0.4 || Control<StackPanel>("Details").Visibility != Visibility.Collapsed || Control<ProgressBar>("CompactHourBar").Uid != "") throw new Exception("Settings slider / mini layout failed.");
                 input.Text = "125"; commit();
@@ -334,11 +362,36 @@ class QuotaWidget
                     window.UpdateLayout();
                     if (Math.Abs(window.ActualHeight - expected) > 2)
                         throw new Exception("Realized height incorrect: " + observations.Last());
+                    foreach (string name in new[] {"SettingsButton","LockButton","RefreshButton","CloseButton"}) {
+                        var icon = (Viewbox)Control<Button>(name).Content;
+                        Rect visualBounds = icon.TransformToAncestor(window).TransformBounds(new Rect(0,0,icon.ActualWidth,icon.ActualHeight));
+                        double expectedIcon = 13*Math.Min(1,scale);
+                        if (Math.Abs(visualBounds.Width-expectedIcon) > 1 || Math.Abs(visualBounds.Height-expectedIcon) > 1)
+                            throw new Exception("Icon scale cap failed: " + name + " at " + scale);
+                    }
                 }
                 locked = false; SetExpanded(false); window.UpdateLayout();
             }
         }
         locked = false; SetZoom(1); SetExpanded(false);
+        double stableBottom = window.Top+window.Height;
+        SetPinnedIcons(false); window.UpdateLayout();
+        if (Control<Grid>("Toolbar").Visibility != Visibility.Collapsed || Control<Grid>("LayoutRoot").RowDefinitions[1].Height.Value != 0)
+            throw new Exception("Unpinned collapsed toolbar still occupies space.");
+        if (Math.Abs(window.Top+window.Height-stableBottom) > 0.1) throw new Exception("Unpinning moved the bottom anchor.");
+        double collapsedWithoutIcons = window.Height;
+        SetExpanded(true); window.UpdateLayout();
+        if (Control<Grid>("Toolbar").Visibility != Visibility.Visible || window.Height <= collapsedWithoutIcons || Math.Abs(window.Top+window.Height-stableBottom) > 0.1)
+            throw new Exception("Unpinned toolbar did not expand upward with a fixed bottom.");
+        double anchoredIconBottom = Control<Button>("SettingsButton").TranslatePoint(new Point(0,17),window).Y+window.Top;
+        SetExpanded(false); window.UpdateLayout(); SetExpanded(true); window.UpdateLayout();
+        if (Math.Abs(Control<Button>("SettingsButton").TranslatePoint(new Point(0,17),window).Y+window.Top-anchoredIconBottom) > 0.1)
+            throw new Exception("Icon position changed between expansions.");
+        SetZoom(0.4); SetExpanded(false); window.UpdateLayout();
+        if (Control<Grid>("Toolbar").Visibility != Visibility.Collapsed) throw new Exception("Mini collapsed toolbar not hidden.");
+        SetExpanded(true); window.UpdateLayout();
+        if (Control<Grid>("Toolbar").Visibility != Visibility.Visible) throw new Exception("Mini hover cannot restore toolbar.");
+        SetPinnedIcons(true); SetZoom(1); SetExpanded(false);
         window.Top = 450;
         var settingsTest = new Window { Width = 360, Height = 240, Opacity = 0, ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual };
         settingsWindow = settingsTest;
@@ -1022,7 +1075,7 @@ class QuotaWidget
                 window.Icon = decoder.Frames[0];
             }
             Control<Button>("RefreshButton").Click += (s, e) => Refresh(true);
-            if (!checking) { LoadLanguage(); LoadZoom(); LoadTheme(); }
+            if (!checking) { LoadLanguage(); LoadZoom(); LoadTheme(); LoadToolbarPreference(); }
             ConfigureInteraction();
             ApplyTheme();
             if (args.Length == 2 && args[0] == "--layout-check") {
