@@ -38,7 +38,7 @@ try {
     foreach ($item in $images) { $writer.Write([byte[]]$item.Bytes) }
 } finally { $writer.Dispose() }
 $framework = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
-$name = if ($Variant -eq 'default') { 'CodexQuota.exe' } else { 'CodexQuota_' + $Variant + '.exe' }
+$name = if ($Variant -eq 'default') { 'UsageQuery.exe' } else { 'UsageQuery_' + $Variant + '.exe' }
 $output = Join-Path $destination $name
 $arguments = @('/nologo','/target:winexe',"/out:$output", "/win32icon:$iconPath",
     "/resource:$iconPath,Widget.ico", "/resource:$PSScriptRoot/Widget.xaml,Widget.xaml",
