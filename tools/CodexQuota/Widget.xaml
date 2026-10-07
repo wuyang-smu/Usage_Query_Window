@@ -15,7 +15,7 @@
    <Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock x:Name="TitleLabel" Text="Codex 额度" Foreground="#F0F3FA" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" />
    <TextBlock x:Name="Updated" Foreground="#96A3BC" Margin="6,0,0,0" Grid.Column="1" FontSize="10" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right" />
   </Grid><Grid x:Name="HourInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-    <TextBlock x:Name="HourLabel" Foreground="#D3DAE8" TextWrapping="NoWrap" FontWeight="Bold" />
+    <TextBlock x:Name="HourLabel" Foreground="#F0F3FA" TextWrapping="NoWrap" FontWeight="Bold" FontSize="13" />
     <TextBlock Text="|" Grid.Column="1" Foreground="#96A3BC" />
     <TextBlock x:Name="HourValue" Grid.Column="2" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
     <TextBlock Text="|" Grid.Column="3" Foreground="#96A3BC" />
@@ -24,7 +24,7 @@
    <ProgressBar x:Name="HourBar" Height="17" Margin="0,2,0,2" Maximum="100" BorderThickness="0" />
    <ProgressBar x:Name="HourTimeBar" Height="5" Margin="0,0,0,8" Maximum="100" BorderThickness="0" />
    <Grid x:Name="WeekInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-    <TextBlock x:Name="WeekLabel" Foreground="#D3DAE8" TextWrapping="NoWrap" FontWeight="Bold" />
+    <TextBlock x:Name="WeekLabel" Foreground="#F0F3FA" TextWrapping="NoWrap" FontWeight="Bold" FontSize="13" />
     <TextBlock Text="|" Grid.Column="1" Foreground="#96A3BC" />
     <TextBlock x:Name="WeekValue" Grid.Column="2" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
     <TextBlock Text="|" Grid.Column="3" Foreground="#96A3BC" />
@@ -35,11 +35,11 @@
    </StackPanel>
   <Grid x:Name="Compact" Visibility="Collapsed">
    <Grid.RowDefinitions><RowDefinition Height="21" /><RowDefinition Height="7" /><RowDefinition Height="6" /><RowDefinition Height="21" /><RowDefinition Height="7" /></Grid.RowDefinitions>
-   <TextBlock Text="5h" Foreground="#D3DAE8" FontSize="12" HorizontalAlignment="Left" Margin="6,0,0,0" TextWrapping="NoWrap" Panel.ZIndex="2" FontWeight="Bold" x:Name="CompactHourLabel" />
+   <TextBlock Text="5h" Foreground="#F0F3FA" FontSize="13" HorizontalAlignment="Left" Margin="6,0,0,0" TextWrapping="NoWrap" Panel.ZIndex="2" FontWeight="Bold" x:Name="CompactHourLabel" />
    <ProgressBar x:Name="CompactHourBar" Height="19" Maximum="100" BorderThickness="0" />
    <ProgressBar x:Name="CompactHourTimeBar" Grid.Row="0" Grid.RowSpan="2" Height="5" Margin="0,22,0,0" Maximum="100" BorderThickness="0" VerticalAlignment="Top" />
    <TextBlock x:Name="CompactHourReset" Visibility="Collapsed" />
-   <TextBlock x:Name="CompactWeekLabel" Text="周" Grid.Row="3" Foreground="#D3DAE8" FontSize="12" HorizontalAlignment="Left" Margin="6,0,0,0" TextWrapping="NoWrap" Panel.ZIndex="2" FontWeight="Bold" />
+   <TextBlock x:Name="CompactWeekLabel" Text="周" Grid.Row="3" Foreground="#F0F3FA" FontSize="13" HorizontalAlignment="Left" Margin="6,0,0,0" TextWrapping="NoWrap" Panel.ZIndex="2" FontWeight="Bold" />
    <ProgressBar x:Name="CompactWeekBar" Grid.Row="3" Height="19" Maximum="100" BorderThickness="0" />
    <ProgressBar x:Name="CompactWeekTimeBar" Grid.Row="3" Grid.RowSpan="2" Height="5" Margin="0,22,0,0" Maximum="100" BorderThickness="0" VerticalAlignment="Top" />
    <TextBlock x:Name="CompactWeekReset" Visibility="Collapsed" />
