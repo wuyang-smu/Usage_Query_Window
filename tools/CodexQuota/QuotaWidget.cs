@@ -309,6 +309,68 @@ class QuotaWidget
         } finally { settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
     }
     static string settingsPreviewPath;
+    static void WaitForHoverCheck() {
+        var frame = new DispatcherFrame();
+        var finish = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        finish.Tick += (s,e) => frame.Continue = false;
+        finish.Start(); Dispatcher.PushFrame(frame); finish.Stop();
+    }
+    static void RaiseHover(UIElement target, RoutedEvent routedEvent) {
+        target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice,0) { RoutedEvent = routedEvent });
+    }
+    static void CheckHoverBoundary(string report) {
+        window.Opacity = 0; window.ShowActivated = false; window.ShowInTaskbar = false;
+        window.Left = -10000; window.Top = -10000;
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        snapshot = new Snapshot { Time = DateTimeOffset.UtcNow, Live = true,
+            Hour = new Limit { Remaining = 65, Reset = now+18000 },
+            Week = new Limit { Remaining = 72, Reset = now+604800 } };
+        window.Show(); window.UpdateLayout();
+        foreach (string name in new[] {"SettingsButton","LockButton","RefreshButton","CloseButton"}) {
+            var button = Control<Button>(name); button.ApplyTemplate();
+            var templateRoot = VisualTreeHelper.GetChild(button,0) as Grid;
+            if (templateRoot == null || ((SolidColorBrush)templateRoot.Background).Color.A != 0)
+                throw new Exception("Toolbar button background is not transparent.");
+            foreach (Trigger trigger in button.Style.Triggers) {
+                foreach (Setter setter in trigger.Setters)
+                    if (setter.Property == System.Windows.Controls.Control.BackgroundProperty)
+                        throw new Exception("Button state changes its background.");
+            }
+            var canvas = (Canvas)((Viewbox)button.Content).Child;
+            foreach (System.Windows.Shapes.Shape shape in canvas.Children)
+                if (!BindingOperations.IsDataBound(shape,System.Windows.Shapes.Shape.StrokeProperty)) throw new Exception("Icon stroke is not bound to button highlight.");
+        }
+        ToggleLock(); window.UpdateLayout();
+        if (Control<Button>("LockButton").Foreground.ToString() != ((Brush)window.Resources["ToolbarHover"]).ToString()
+            || Control<System.Windows.Shapes.Path>("LockGlyph").Stroke.ToString() != Control<Button>("LockButton").Foreground.ToString())
+            throw new Exception("Persistent lock icon highlight failed.");
+        ToggleLock(); collapseTimer.Stop();
+        foreach (bool pinned in new[] {false,true}) {
+            SetPinnedIcons(pinned);
+            foreach (double scale in new[] {0.4,1.0}) {
+                SetZoom(scale); SetExpanded(false); collapseTimer.Stop();
+                RaiseHover(window,System.Windows.Input.Mouse.MouseEnterEvent);
+                RaiseHover(Control<Grid>("Toolbar"),System.Windows.Input.Mouse.MouseEnterEvent);
+                if (expanded) throw new Exception("Toolbar hover expanded collapsed window.");
+                RaiseHover(Control<Grid>("QuotaArea"),System.Windows.Input.Mouse.MouseEnterEvent);
+                RaiseHover(Control<Grid>("QuotaArea"),System.Windows.Input.Mouse.MouseLeaveEvent);
+                RaiseHover(Control<Grid>("Toolbar"),System.Windows.Input.Mouse.MouseEnterEvent);
+                if (collapseTimer.IsEnabled) throw new Exception("Content-to-toolbar transition armed collapse.");
+                WaitForHoverCheck();
+                if (!expanded || Control<Grid>("Toolbar").Visibility != Visibility.Visible) throw new Exception("Toolbar disappeared while staying inside window.");
+                RaiseHover(window,System.Windows.Input.Mouse.MouseLeaveEvent);
+                if (!collapseTimer.IsEnabled) throw new Exception("Window exit did not arm collapse.");
+                RaiseHover(window,System.Windows.Input.Mouse.MouseEnterEvent);
+                if (collapseTimer.IsEnabled) throw new Exception("Window reentry did not cancel collapse.");
+                RaiseHover(window,System.Windows.Input.Mouse.MouseLeaveEvent); WaitForHoverCheck();
+                if (expanded || (Control<Grid>("Toolbar").Visibility == Visibility.Visible) != pinned) throw new Exception("Window exit collapse / toolbar preference failed.");
+            }
+        }
+        SetZoom(1); SetExpanded(false);
+        SavePreview(Path.Combine(Path.GetDirectoryName(report),"buttons-normal.png"));
+        ToggleLock(); SavePreview(Path.Combine(Path.GetDirectoryName(report),"buttons-locked.png"));
+        File.WriteAllText(report,"PASS: transparent toolbar templates, icon foreground bindings and persistent lock highlight; routed content-to-toolbar transitions remain expanded beyond the collapse delay; whole-window exit collapses; reentry cancels collapse; collapsed toolbar hover does not expand. Checked pinned and unpinned at 40% and 100% in a realized transparent window. No account queries or preference writes. Physical pointer / pressed-state interaction not exercised.\r\n");
+    }
     static void PositionSettings(Window dialog, double estimatedHeight = 0) {
         const double gap = 8;
         var area = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(window).Handle).WorkingArea;
@@ -427,13 +489,17 @@ class QuotaWidget
         }
     }
     static void ApplyTheme() {
+        var iconColor = ((SolidColorBrush)Theme.Brush("icons")).Color;
+        window.Resources["ToolbarNormal"] = new SolidColorBrush(iconColor);
+        window.Resources["ToolbarHover"] = LightenIcon(iconColor,0.55);
+        window.Resources["ToolbarPressed"] = LightenIcon(iconColor,0.85);
         var root = Control<Border>("Root");
         root.Background = Theme.Brush("background"); root.BorderBrush = Theme.Brush("windowBorder");
         foreach (var child in Children(root)) {
             var text = child as TextBlock;
             if (text != null) text.Foreground = Theme.Brush(text.Name == "TitleLabel" ? "title" : "label");
             var shape = child as System.Windows.Shapes.Shape;
-            if (shape != null) shape.Stroke = Theme.Brush("icons");
+            if (shape != null && !BindingOperations.IsDataBound(shape,System.Windows.Shapes.Shape.StrokeProperty)) shape.Stroke = Theme.Brush("icons");
             var segmented = child as SegmentedVisual;
             if (segmented != null) segmented.InvalidateVisual();
         }
@@ -506,6 +572,12 @@ class QuotaWidget
         }
         finally { if (!accepted) Theme.Colors = original; appearanceOpen = false; ApplyTheme(); if (!window.IsMouseOver) collapseTimer.Start(); }
     }
+    static Brush LightenIcon(Color color, double amount) {
+        return new SolidColorBrush(Color.FromArgb(color.A,
+            (byte)Math.Round(color.R+(255-color.R)*amount),
+            (byte)Math.Round(color.G+(255-color.G)*amount),
+            (byte)Math.Round(color.B+(255-color.B)*amount)));
+    }
     static string PreferenceFile() {
         string local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
         if (string.IsNullOrEmpty(local)) local = Path.Combine(Environment.GetEnvironmentVariable("USERPROFILE"), "AppData", "Local");
@@ -540,7 +612,7 @@ class QuotaWidget
     }
     static void UpdateLock() {
         Control<Button>("LockButton").ToolTip = locked ? Text("解除锁定", "Unlock expanded view") : Text("锁定展开", "Lock expanded view");
-        Control<System.Windows.Shapes.Path>("LockGlyph").Stroke = Theme.Brush("icons");
+        Control<Button>("LockButton").Tag = locked ? "locked" : "";
         Control<System.Windows.Shapes.Path>("LockGlyph").Data = Geometry.Parse(locked
             ? "M 6,10 V 7 A 4,4 0 0 1 14,7 V 10 M 3,10 H 17 V 17 H 3 Z"
             : "M 6,10 V 7 A 4,4 0 0 1 14,7 M 3,10 H 17 V 17 H 3 Z");
@@ -588,10 +660,14 @@ class QuotaWidget
         collapseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         collapseTimer.Tick += (s, e) => {
             collapseTimer.Stop();
-            if (!locked && !appearanceOpen && !settingsOpen && !dragging && !Control<Grid>("QuotaArea").IsMouseOver) SetExpanded(false);
+            if (!locked && !appearanceOpen && !settingsOpen && !dragging && !window.IsMouseOver) SetExpanded(false);
         };
+        // Expansion belongs to the quota area; collapse belongs to leaving the whole window.
+        // Keeping these boundaries separate prevents hidden buttons moving a stationary
+        // pointer back into the quota area and repeatedly reopening the widget.
+        window.MouseEnter += (s,e) => collapseTimer.Stop();
+        window.MouseLeave += (s,e) => { if (!dragging) collapseTimer.Start(); };
         Control<Grid>("QuotaArea").MouseEnter += (s, e) => { collapseTimer.Stop(); SetExpanded(true); };
-        Control<Grid>("QuotaArea").MouseLeave += (s, e) => { if (!dragging) collapseTimer.Start(); };
         window.PreviewMouseWheel += (s, e) => {
             ChangeZoom(e.Delta);
             zoomPaintUntil = DateTime.UtcNow.AddMilliseconds(250); zoomPaintTimer.Start();
@@ -978,6 +1054,8 @@ class QuotaWidget
             double bottom = window.Top + window.Height;
             SavePreview(Path.Combine(folder, english ? "english-details.png" : "chinese-details.png"));
             Control<Grid>("QuotaArea").RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = System.Windows.Input.Mouse.MouseLeaveEvent });
+            if (collapseTimer.IsEnabled) throw new Exception("Leaving quota area armed collapse while inside the widget.");
+            RaiseHover(window,System.Windows.Input.Mouse.MouseLeaveEvent);
             var frame = new DispatcherFrame();
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
             timer.Tick += (s, e) => frame.Continue = false;
@@ -1066,7 +1144,7 @@ class QuotaWidget
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -1078,6 +1156,9 @@ class QuotaWidget
             if (!checking) { LoadLanguage(); LoadZoom(); LoadTheme(); LoadToolbarPreference(); }
             ConfigureInteraction();
             ApplyTheme();
+            if (args.Length == 2 && args[0] == "--hover-check") {
+                CheckHoverBoundary(args[1]); window.Close(); return 0;
+            }
             if (args.Length == 2 && args[0] == "--layout-check") {
                 CheckRealizedLayout(args[1]); window.Close(); return 0;
             }
