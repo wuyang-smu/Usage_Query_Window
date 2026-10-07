@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows.Media;
 
@@ -9,7 +9,7 @@ public static class Theme
     public static readonly string[] English = { "Quota · ≥30%", "Quota · 20%–<30%", "Quota · 10%–<20%", "Quota · <10%", "Time · ≤20%", "Time · >20%–40%", "Time · >40%–60%", "Time · >60%", "Window title", "Labels / separators (5h/Wk)", "Expanded · percentage", "Expanded · countdown", "Compact · value caption", "Status text", "Alert text", "Ticks", "Bar outline", "Window outline", "Empty track", "Window background", "Toolbar icons" };
     public static Dictionary<string,string> Colors = Defaults();
     public static Dictionary<string,string> Defaults() {
-        string[] values = { "#237A57", "#AD8522", "#B65B20", "#B93649", "#237A57", "#AD8522", "#B65B20", "#B93649", "#F0F3FA", "#F0F3FA", "#F0F3FA", "#F0F3FA", "#F0F3FA", "#96A3BC", "#FF9D66", "#111722", "#718096", "#47536B", "#354057", "#F21B2130", "#AAB5CA" };
+        string[] values = { "#438A70", "#C3A356", "#C17D4D", "#B95F6A", "#438A70", "#C3A356", "#C17D4D", "#B95F6A", "#F2F4F7", "#F2F4F7", "#F2F4F7", "#F2F4F7", "#F2F4F7", "#AAB3C2", "#C17D4D", "#15181E", "#15181E", "#444C59", "#303640", "#20242C", "#AAB3C2" };
         var result = new Dictionary<string,string>();
         for (int i=0;i<Keys.Length;i++) result[Keys[i]]=values[i];
         return result;
