@@ -22,6 +22,10 @@ public class SegmentedVisual : FrameworkElement
     public static readonly DependencyProperty FillProperty = DependencyProperty.Register("Fill", typeof(Brush), typeof(SegmentedVisual), new FrameworkPropertyMetadata(Brushes.Transparent, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register("Kind", typeof(string), typeof(SegmentedVisual), new FrameworkPropertyMetadata("quota", FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty CaptionProperty = DependencyProperty.Register("Caption", typeof(string), typeof(SegmentedVisual), new FrameworkPropertyMetadata("—", FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty LabelProperty = DependencyProperty.RegisterAttached("Label",typeof(string),typeof(SegmentedVisual),new FrameworkPropertyMetadata("",FrameworkPropertyMetadataOptions.AffectsRender));
+    public string Label {get{return (string)GetValue(LabelProperty);}set{SetValue(LabelProperty,value);}}
+    public static readonly DependencyProperty DayMarkerProperty = DependencyProperty.Register("DayMarker", typeof(double), typeof(SegmentedVisual), new FrameworkPropertyMetadata(-1.0, FrameworkPropertyMetadataOptions.AffectsRender));
+    public double DayMarker {get {return (double)GetValue(DayMarkerProperty);} set {SetValue(DayMarkerProperty,value);} }
     public string Caption { get { return (string)GetValue(CaptionProperty); } set { SetValue(CaptionProperty, value); } }
     public double Value { get { return (double)GetValue(ValueProperty); } set { SetValue(ValueProperty, value); } }
     public Brush Fill { get { return (Brush)GetValue(FillProperty); } set { SetValue(FillProperty, value); } }
@@ -32,13 +36,15 @@ public class SegmentedVisual : FrameworkElement
         geometry.Freeze(); return geometry;
     }
     protected override void OnRender(DrawingContext context) {
+        if(Kind=="marker-gap") return;
+        if(Kind=="week-marker-overlay") {DrawPairMarker(context,ActualWidth,ActualHeight);return;}
         bool time = Kind.StartsWith("time"), labels = Kind.EndsWith("center");
         bool fullTicks = time || Kind.Contains("full");
         bool detail = Kind.Contains("detail");
         double width = ActualWidth, height = ActualHeight;
         if (width <= 0 || height <= 0) return;
         var empty = Theme.Brush("track");
-        double[] boundaries = time ? (Kind.Contains("week") ? new double[] {0,100.0/7,200.0/7,300.0/7,400.0/7,500.0/7,600.0/7,100} : new double[] {0,20,40,60,80,100}) : new double[] { 0,20,40,60,80,100 };
+        double[] boundaries = Kind.Contains("week") ? new double[] {0,100.0/7,200.0/7,300.0/7,400.0/7,500.0/7,600.0/7,100} : new double[] {0,20,40,60,80,100};
         double end = width * Math.Max(0, Math.Min(100, Value)) / 100;
         double slope = width * 0.30;
         var shape = Outline(width,height,slope,0);
@@ -46,18 +52,13 @@ public class SegmentedVisual : FrameworkElement
         context.PushClip(shape);
         if (end > 0) context.DrawRectangle(Fill, null, new Rect(0,0,end,height));
         FormattedText caption = labels && !string.IsNullOrEmpty(Caption) ? new FormattedText(Caption, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-            new Typeface(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), 13, Brushes.WhiteSmoke, VisualTreeHelper.GetDpi(this).PixelsPerDip) : null;
-        double textLeft = caption == null ? -1 : (width-caption.Width)/2;
+            new Typeface(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), Kind.Contains("narrow") ? 11 : 13, Brushes.WhiteSmoke, VisualTreeHelper.GetDpi(this).PixelsPerDip) : null;
+        double textLeft = caption == null ? -1 : Kind.Contains("right") ? width-caption.Width-6 : (width-caption.Width)/2;
         double textRight = caption == null ? -1 : (width+caption.Width)/2;
-        var bigMark = new Pen(Theme.Brush("ticks"),detail ? 2 : 3.5);
-        var smallMark = new Pen(Theme.Brush("ticks"),2);
+        var bigMark = new Pen(Theme.Brush("ticks"),(detail ? 2 : 3.5)-(time || Kind.Contains("week") ? 0 : 0.5));
         for (int i = 1; i < boundaries.Length - 1; i++) {
             double x = width * boundaries[i] / 100;
             context.DrawLine(bigMark,new Point(x,fullTicks ? 0 : detail ? height*0.5 : height*0.75),new Point(x,height));
-        }
-        foreach (int tick in time ? new int[0] : new[] { 10,30,50,70,90 }) {
-            double x = width*tick/100;
-            context.DrawLine(smallMark,new Point(x,fullTicks ? 0 : height*0.75),new Point(x,height));
         }
         context.Pop();
         var borderBrush = Theme.Brush("barBorder");
@@ -67,7 +68,27 @@ public class SegmentedVisual : FrameworkElement
             // Outline only the glyphs, keeping the bar visible behind and between characters.
             caption.SetForegroundBrush(Theme.Brush("caption"));
             context.DrawText(caption,origin);
+            if(!string.IsNullOrEmpty(Label)) {
+                var label=new FormattedText(Label,CultureInfo.InvariantCulture,FlowDirection.LeftToRight,
+                    new Typeface(new FontFamily("Microsoft YaHei UI"),FontStyles.Normal,FontWeights.Bold,FontStretches.Normal),Kind.Contains("narrow") ? 11 : 13,Theme.Brush("label"),VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                context.DrawText(label,new Point(6,origin.Y+caption.Baseline-label.Baseline));
+            }
         }
+    }
+    void DrawPairMarker(DrawingContext context,double width,double height) {
+        if(DayMarker<0 || DayMarker>1 || width<=0 || height<=0) return;
+        double half=Math.Min(3,width/4), x=Math.Max(half+0.8,Math.Min(width-half-0.8,width*DayMarker));
+        var color=new SolidColorBrush(Color.FromRgb(112,184,255));
+        context.PushClip(new RectangleGeometry(new Rect(0,0,width,height)));
+        double bottom=height-7;
+        context.DrawLine(new Pen(new SolidColorBrush(Color.FromArgb(35,112,184,255)),3),new Point(x,bottom-0.7),new Point(x,height-0.7));
+        context.DrawLine(new Pen(color,1),new Point(x,bottom-0.7),new Point(x,height-0.7));
+        {
+            var geometry=new StreamGeometry();
+            using(var path=geometry.Open()) {path.BeginFigure(new Point(x,bottom-4.7),true,true);path.LineTo(new Point(x+half,bottom-0.7),true,false);path.LineTo(new Point(x-half,bottom-0.7),true,false);}
+            context.DrawGeometry(color,null,geometry);
+        }
+        context.Pop();
     }
 }
 
@@ -83,9 +104,11 @@ class QuotaWidget
     static Window window;
     static Snapshot snapshot;
     static bool reading;
+    static bool activeReading;
     static string diagnostic = "";
     static bool queryFailed;
     static string queryError = "";
+    static string localReadWarning = "";
     static bool english, checking, expanded = true, dragging;
     static bool locked, appearanceOpen;
     static DispatcherTimer collapseTimer;
@@ -99,22 +122,60 @@ class QuotaWidget
     static Window settingsWindow;
     static System.Windows.Controls.Primitives.Popup welcomePopup;
     static void ConfigureSegments() {
-        foreach (string name in new[] { "HourBar", "WeekBar", "CompactHourBar", "CompactWeekBar", "HourTimeBar", "WeekTimeBar", "CompactHourTimeBar", "CompactWeekTimeBar" }) {
+        foreach (string name in new[] { "HourBar", "WeekBar", "CompactHourBar", "CompactWeekBar", "HourTimeBar", "WeekTimeBar", "CompactHourTimeBar", "CompactWeekTimeBar", "WeekGap", "CompactWeekGap", "WeekMarker", "CompactWeekMarker" }) {
             var bar = Control<ProgressBar>(name);
             bar.Uid = "—";
             bar.Tag = name.Contains("Time") ? "time" : "quota";
-            if (name.Contains("Time") && name.Contains("Week")) bar.Tag += "-week";
+            if (name.Contains("Week")) bar.Tag += "-week";
             if (name.StartsWith("Compact") && !name.Contains("Time")) bar.Tag += "-center";
             else if (!name.Contains("Time")) bar.Tag += "-detail";
+            if(name.EndsWith("Gap")) bar.Tag="marker-gap";
+            if(name.EndsWith("Marker")) bar.Tag="week-marker-overlay";
             var visual = new FrameworkElementFactory(typeof(SegmentedVisual));
             visual.SetBinding(SegmentedVisual.ValueProperty, new Binding("Value") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.FillProperty, new Binding("Foreground") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.KindProperty, new Binding("Tag") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.CaptionProperty, new Binding("Uid") { RelativeSource = RelativeSource.TemplatedParent });
+            visual.SetBinding(SegmentedVisual.LabelProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.LabelProperty),RelativeSource=RelativeSource.TemplatedParent});
+            visual.SetBinding(SegmentedVisual.DayMarkerProperty, new Binding("DataContext") { RelativeSource = RelativeSource.TemplatedParent });
+            bar.DataContext=-1.0;
             bar.Template = new ControlTemplate(typeof(ProgressBar)) { VisualTree = visual };
         }
     }
     static double zoom = 1;
+    static double textThreshold = 0.8, baseWidth = 360;
+    static DateTimeOffset lastActiveCompleted = DateTimeOffset.MinValue;
+    class DisplayOptions { public double TextThreshold = 0.8, Width = 360; }
+    static string DisplayOptionsFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"display.json"); }
+    static void ApplyDisplayOptions(DisplayOptions options) {
+        if (options == null) return;
+        if (!double.IsNaN(options.TextThreshold) && !double.IsInfinity(options.TextThreshold)) textThreshold=Math.Max(0.4,Math.Min(1.5,options.TextThreshold));
+        if (!double.IsNaN(options.Width) && !double.IsInfinity(options.Width)) baseWidth=Math.Max(100,Math.Min(480,options.Width));
+    }
+    static void LoadDisplayOptions() {
+        try { if (File.Exists(DisplayOptionsFile())) ApplyDisplayOptions(new JavaScriptSerializer().Deserialize<DisplayOptions>(File.ReadAllText(DisplayOptionsFile()))); }
+        catch (IOException) {} catch (UnauthorizedAccessException) {} catch (ArgumentException) {} catch (InvalidOperationException) {}
+    }
+    static void SaveDisplayOptions() {
+        if(checking) return;
+        try { Directory.CreateDirectory(Path.GetDirectoryName(DisplayOptionsFile())); File.WriteAllText(DisplayOptionsFile(),new JavaScriptSerializer().Serialize(new DisplayOptions {TextThreshold=textThreshold,Width=baseWidth})); }
+        catch(IOException) {} catch(UnauthorizedAccessException) {}
+    }
+    static double TextWidth(string text, double size, FontWeight weight) {
+        return new FormattedText(text ?? "",CultureInfo.InvariantCulture,FlowDirection.LeftToRight,
+            new Typeface(new FontFamily("Microsoft YaHei UI"),FontStyles.Normal,weight,FontStretches.Normal),size,Brushes.White,VisualTreeHelper.GetDpi(window).PixelsPerDip).Width;
+    }
+    static bool DetailsFit() {
+        foreach(string prefix in new[]{"Hour","Week"}) {
+            var limit=snapshot==null ? null : prefix=="Hour" ? snapshot.Hour : snapshot.Week;
+            if(limit==null) continue;
+            double titleWidth=toolbarTop ? Math.Max(80,TextWidth(Control<TextBlock>(prefix+"Label").Text,13,FontWeights.Bold)+2) : 140;
+            double needed=titleWidth+12+48+12+TextWidth(Control<TextBlock>(prefix+"Reset").Text,13,FontWeights.Bold)+6;
+            if(toolbarTop) needed+=TextWidth("Updated 00:00:00",10,FontWeights.Normal)+6;
+            if(needed>baseWidth-18) return false;
+        }
+        return true;
+    }
     static void LoadZoom() {
         try {
             string path = Path.Combine(Path.GetDirectoryName(PreferenceFile()), "scale.txt");
@@ -137,14 +198,14 @@ class QuotaWidget
         double bottom = (double.IsNaN(window.Top) ? 0 : window.Top) + window.Height;
         double top = double.IsNaN(window.Top) ? 0 : window.Top;
         root.LayoutTransform = new ScaleTransform(zoom, zoom);
-        window.Width = 360 * zoom;
+        window.Width = baseWidth * zoom;
         // Commit LayoutTransform's internal sizing state before reading DesiredSize.
         // A realized window otherwise reports the previous zoom's height.
         window.UpdateLayout();
         foreach (var child in Children(root)) { var element = child as UIElement; if (element != null) element.InvalidateMeasure(); }
         root.InvalidateMeasure();
-        root.Measure(new Size(360 * zoom, double.PositiveInfinity));
-        window.Width = 360 * zoom;
+        root.Measure(new Size(baseWidth * zoom, double.PositiveInfinity));
+        window.Width = baseWidth * zoom;
         window.Height = Math.Ceiling(root.DesiredSize.Height);
         window.Left = right - window.Width;
         window.Top = toolbarTop ? top : bottom - window.Height;
@@ -160,7 +221,8 @@ class QuotaWidget
         Render(); SaveZoom();
     }
     static void ApplyScaleLayout() {
-        bool mini = zoom < 0.8;
+        bool mini = zoom < textThreshold;
+        bool narrowExpanded = false;
         bool compact = !expanded || mini;
         foreach (string name in new[] { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" }) {
             var icon = (Viewbox)Control<Button>(name).Content;
@@ -179,49 +241,87 @@ class QuotaWidget
         Control<Grid>("Toolbar").Margin = toolbarTop ? new Thickness(0) : new Thickness(0,compact ? -1 : 0,0,0);
         for (int i=0;i<toolbarOrder.Length;i++) {
             var button=Control<Button>(toolbarOrder[i]); Grid.SetColumn(button,i+1); button.TabIndex=i;
+            button.Width=Math.Min(24,(baseWidth-18)/4);
             button.VerticalAlignment=toolbarTop ? VerticalAlignment.Top : VerticalAlignment.Center;
-            Control<Grid>("Toolbar").ColumnDefinitions[i+1].Width = toolbarTop ? new GridLength(24) : new GridLength(1,GridUnitType.Star);
+            Control<Grid>("Toolbar").ColumnDefinitions[i+1].Width = toolbarTop ? new GridLength(Math.Min(24,(baseWidth-18)/4)) : new GridLength(1,GridUnitType.Star);
         }
         Control<Grid>("Toolbar").ColumnDefinitions[0].Width = toolbarTop ? new GridLength(1,GridUnitType.Star) : new GridLength(0);
-        ConfigureHeaderPlacement(compact);
-        Control<StackPanel>("Details").Visibility = expanded && !mini ? Visibility.Visible : Visibility.Collapsed;
-        Control<Grid>("Compact").Visibility = expanded && !mini ? Visibility.Collapsed : Visibility.Visible;
+        ConfigureHeaderPlacement(compact,narrowExpanded);
+        Control<StackPanel>("Details").Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        Control<Grid>("Compact").Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
         foreach (string prefix in new[] { "Hour", "Week" }) {
-            Control<TextBlock>("Compact" + prefix + "Label").Visibility = mini ? Visibility.Collapsed : Visibility.Visible;
-            Control<ProgressBar>("Compact" + prefix + "Bar").Tag = mini ? "quota-detail-center" : "quota-center";
-            if (mini) Control<ProgressBar>("Compact" + prefix + "Bar").Uid = "";
+            var label=Control<TextBlock>("Compact"+prefix+"Label");
+            var bar=Control<ProgressBar>("Compact"+prefix+"Bar");
+            bool narrow=baseWidth<=200;
+            double fontSize=narrow ? 11 : 13;
+            label.FontSize=fontSize; label.Text=prefix=="Hour" ? Text(narrow ? "5时" : "5小时","5h") : Text("周","Wk");
+            double captionWidth=TextWidth(bar.Uid,fontSize,FontWeights.Bold);
+            bool hideLabel=mini || (narrow ? baseWidth-18-captionWidth-12 < TextWidth(label.Text,fontSize,FontWeights.Bold)+8
+                : (baseWidth-18-captionWidth)/2 < 6+TextWidth(label.Text,fontSize,FontWeights.Bold)+6);
+            label.Visibility=Visibility.Collapsed;
+            bar.SetValue(SegmentedVisual.LabelProperty,hideLabel ? "" : label.Text);
+            if(mini) bar.Uid="";
+            else if(captionWidth>baseWidth-30) {
+                var limit=snapshot==null ? null : prefix=="Hour" ? snapshot.Hour : snapshot.Week;
+                bar.Uid=limit==null ? "—" : limit.Remaining.ToString("0.#")+"%";
+                if(TextWidth(bar.Uid,fontSize,FontWeights.Bold)>baseWidth-30) bar.Uid="";
+            }
+            bar.Tag = (bar.Uid.Length==0 ? "quota-detail" : "quota")+(prefix=="Week" ? "-week" : "")+(narrow ? "-narrow-right" : "")+"-center";
         }
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
-    static void ConfigureHeaderPlacement(bool compact) {
+    static void ConfigureHeaderPlacement(bool compact, bool unused = false) {
         var title=Control<TextBlock>("TitleLabel"); var header=Control<Grid>("HeaderGrid"); var toolbar=Control<Grid>("Toolbar");
-        var parent=(Panel)title.Parent; var target=toolbarTop ? toolbar : header;
-        if (parent!=target) { parent.Children.Remove(title); target.Children.Add(title); }
-        Grid.SetColumn(title,0); title.Visibility=toolbarTop && compact ? Visibility.Collapsed : Visibility.Visible;
-        title.TextTrimming=TextTrimming.CharacterEllipsis;
+        if(header.Parent!=Control<StackPanel>("Details")) {((Panel)header.Parent).Children.Remove(header);Control<StackPanel>("Details").Children.Insert(0,header);}
+        var target=toolbarTop ? (Panel)toolbar : header;
+        if(title.Parent!=target) {((Panel)title.Parent).Children.Remove(title);target.Children.Add(title);}
+        title.Visibility=compact && toolbarTop ? Visibility.Collapsed : Visibility.Visible;
+        title.TextTrimming=TextTrimming.CharacterEllipsis;title.ToolTip=title.Text;
+        title.VerticalAlignment=VerticalAlignment.Bottom;Grid.SetColumn(title,0);Grid.SetColumnSpan(title,1);
         header.Visibility=toolbarTop ? Visibility.Collapsed : Visibility.Visible;
-        var updated=Control<TextBlock>("TopUpdated");
-        var recordRow=Control<Grid>(snapshot!=null && snapshot.Hour==null && snapshot.Week!=null ? "WeekInfo" : "HourInfo");
-        if (updated.Parent!=recordRow) { ((Panel)updated.Parent).Children.Remove(updated); recordRow.Children.Add(updated); }
-        updated.Visibility=toolbarTop && !compact ? Visibility.Visible : Visibility.Collapsed;
-        updated.Text=snapshot==null ? Text("待更新","Waiting") : Text(queryFailed ? "失败" : "更新",queryFailed ? "Failed" : "Updated")+" "+snapshot.Time.ToLocalTime().ToString("HH:mm:ss");
-        updated.Foreground=Control<TextBlock>("Updated").Foreground;
-        updated.ToolTip=Control<TextBlock>("Updated").Text+"\n"+Control<TextBlock>("Updated").ToolTip;
-        double titleWidth=80;
-        if (toolbarTop) foreach(string name in new[] {"HourLabel","WeekLabel"}) {
-            var label=Control<TextBlock>(name);
-            var measure=new FormattedText(label.Text ?? "",CultureInfo.InvariantCulture,FlowDirection.LeftToRight,
-                new Typeface(label.FontFamily,label.FontStyle,label.FontWeight,label.FontStretch),label.FontSize,Brushes.White,VisualTreeHelper.GetDpi(label).PixelsPerDip);
-            titleWidth=Math.Max(titleWidth,Math.Ceiling(measure.Width)+2);
+        Control<TextBlock>("Updated").Visibility=Visibility.Collapsed;
+        Control<TextBlock>("TopUpdated").Visibility=Visibility.Collapsed;
+        Control<Grid>("Compact").Margin=new Thickness(0);
+        double available=baseWidth-18;
+        title.FontSize=13;title.FontWeight=FontWeights.Bold;
+        double iconSize=13/Math.Max(1,zoom);
+        double buttonSlot=iconSize+6/zoom;
+        if(toolbarTop && !compact && TextWidth(title.Text,13,FontWeights.Bold)+buttonSlot*4+4>available) title.FontSize=10;
+        double room=available-(toolbarTop && !compact ? TextWidth(title.Text,title.FontSize,FontWeights.Bold)+4 : 0);
+        buttonSlot=Math.Min(buttonSlot,room/4);
+        toolbar.ColumnDefinitions[0].Width=new GridLength(1,GridUnitType.Star);
+        title.Margin=new Thickness(0,0,toolbarTop ? 4 : 0,0);
+        foreach(string name in toolbarOrder) {
+            var button=Control<Button>(name);button.Width=buttonSlot;
+            button.VerticalAlignment=toolbarTop ? VerticalAlignment.Bottom : VerticalAlignment.Center;
+            var icon=(Viewbox)button.Content;icon.Width=icon.Height=Math.Min(13/Math.Max(1,zoom),Math.Max(8,buttonSlot-2));
+            toolbar.ColumnDefinitions[Grid.GetColumn(button)].Width=new GridLength(buttonSlot);
         }
-        foreach(string prefix in new[] {"Hour","Week"}) {
+        ConfigureDetailColumns(available);
+    }
+    static void ConfigureDetailColumns(double available) {
+        double labelWidth=0,valueWidth=0,timeWidth=0;
+        foreach(string prefix in new[]{"Hour","Week"}) {
+            if(Control<ProgressBar>(prefix+"Bar").Visibility!=Visibility.Visible) continue;
+            labelWidth=Math.Max(labelWidth,TextWidth(Control<TextBlock>(prefix+"Label").Text,13,FontWeights.Bold));
+            valueWidth=Math.Max(valueWidth,TextWidth(Control<TextBlock>(prefix+"Value").Text,13,FontWeights.Bold));
+            timeWidth=Math.Max(timeWidth,TextWidth(Control<TextBlock>(prefix+"Reset").Text,13,FontWeights.Bold));
+        }
+        labelWidth=Math.Ceiling(labelWidth)+2;valueWidth=Math.Ceiling(valueWidth)+2;timeWidth=Math.Ceiling(timeWidth)+2;
+        bool showLabel=labelWidth+12+valueWidth+12+timeWidth<=available;
+        bool showTime=valueWidth+12+timeWidth<=available;
+        foreach(string prefix in new[]{"Hour","Week"}) {
             var row=Control<Grid>(prefix+"Info");
-            row.ColumnDefinitions[0].Width=new GridLength(toolbarTop ? titleWidth : 140);
-            bool timeHere=toolbarTop && row==recordRow;
-            row.ColumnDefinitions[4].Width=timeHere ? new GridLength(prefix=="Hour" ? 46 : 78) : new GridLength(1,GridUnitType.Star);
-            row.ColumnDefinitions[5].Width=timeHere ? new GridLength(1,GridUnitType.Star) : new GridLength(0);
-            Control<TextBlock>(prefix+"Reset").TextTrimming=toolbarTop ? TextTrimming.CharacterEllipsis : TextTrimming.None;
+            row.ColumnDefinitions[0].Width=new GridLength(showLabel ? labelWidth : 0);
+            row.ColumnDefinitions[1].Width=new GridLength(showLabel ? 12 : 0);
+            row.ColumnDefinitions[2].Width=new GridLength(valueWidth);
+            row.ColumnDefinitions[3].Width=new GridLength(showTime ? 12 : 0);
+            row.ColumnDefinitions[4].Width=new GridLength(showTime ? timeWidth : 0);
+            row.ColumnDefinitions[5].Width=new GridLength(1,GridUnitType.Star);
+            Control<TextBlock>(prefix+"Label").Visibility=showLabel ? Visibility.Visible : Visibility.Collapsed;
+            Control<TextBlock>(prefix+"Reset").Visibility=showTime ? Visibility.Visible : Visibility.Collapsed;
+            foreach(var text in row.Children.OfType<TextBlock>().Where(item=>item.Text=="|")) text.Visibility=(Grid.GetColumn(text)==1 ? showLabel : showTime) ? Visibility.Visible : Visibility.Collapsed;
         }
     }
     static string ToolbarPreferenceFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "toolbar.txt"); }
@@ -298,26 +398,63 @@ class QuotaWidget
             dismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         } else welcomePopup.IsOpen = true;
     }
+    static Action AddNumberSetting(StackPanel panel, TextBlock label, double minimum, double maximum, double initial, string suffix, Action<double> apply) {
+        label.Margin=new Thickness(0,0,0,6); panel.Children.Add(label);
+        var row=new Grid {Margin=new Thickness(0,0,0,12)};
+        row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(66)}); row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(24)});
+        var slider=new Slider {Minimum=minimum,Maximum=maximum,Value=initial,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,0,12,0),VerticalAlignment=VerticalAlignment.Center};
+        var input=new TextBox {Text=initial.ToString("0",CultureInfo.InvariantCulture),Padding=new Thickness(7,5,7,5),Background=new SolidColorBrush(Color.FromRgb(48,58,75)),Foreground=Brushes.WhiteSmoke,BorderThickness=new Thickness(0)};
+        var unit=new TextBlock {Text=suffix,VerticalAlignment=VerticalAlignment.Center};
+        row.Children.Add(slider); Grid.SetColumn(input,1);row.Children.Add(input);Grid.SetColumn(unit,2);row.Children.Add(unit);panel.Children.Add(row);
+        label.Tag=row;
+        slider.ValueChanged+=(s,e)=>{apply(slider.Value);input.Text=slider.Value.ToString("0",CultureInfo.InvariantCulture);input.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);};
+        Action commit=()=>{double value; if(!double.TryParse(input.Text.Trim().TrimEnd('%'),NumberStyles.Float,CultureInfo.InvariantCulture,out value)||double.IsNaN(value)||double.IsInfinity(value)){input.BorderBrush=Brushes.OrangeRed;return;}
+            value=Math.Round(Math.Max(minimum,Math.Min(maximum,value)));slider.Value=value;apply(value);input.Text=value.ToString("0",CultureInfo.InvariantCulture);input.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);};
+        input.LostKeyboardFocus+=(s,e)=>commit();input.KeyDown+=(s,e)=>{if(e.Key==System.Windows.Input.Key.Enter){commit();e.Handled=true;}};
+        return commit;
+    }
+    static ResourceDictionary SettingsStyles() {
+        return (ResourceDictionary)XamlReader.Parse(@"<ResourceDictionary xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>
+<Style TargetType='TextBox'><Setter Property='Foreground' Value='#F2F4F7'/><Setter Property='Background' Value='#303A4B'/><Setter Property='BorderBrush' Value='#46536B'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='TextBox'><Border Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='1' CornerRadius='5' Padding='{TemplateBinding Padding}'><ScrollViewer x:Name='PART_ContentHost'/></Border></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='Button'><Setter Property='Background' Value='#303A4B'/><Setter Property='Foreground' Value='#F2F4F7'/><Setter Property='BorderBrush' Value='#46536B'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'><Border x:Name='Body' Background='{TemplateBinding Background}' CornerRadius='5' Padding='{TemplateBinding Padding}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='1'><ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Body' Property='Background' Value='#426DA7'/></Trigger><Trigger Property='IsPressed' Value='True'><Setter TargetName='Body' Property='Background' Value='#355D90'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='ComboBoxItem'><Setter Property='Foreground' Value='#F2F4F7'/><Setter Property='Padding' Value='8,5'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ComboBoxItem'><Border x:Name='Item' Background='Transparent' Padding='{TemplateBinding Padding}'><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Item' Property='Background' Value='#426DA7'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='ComboBox'><Setter Property='Foreground' Value='#F2F4F7'/><Setter Property='Padding' Value='8,6'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ComboBox'><Grid>
+<ToggleButton Focusable='False' IsChecked='{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}'><ToggleButton.Template><ControlTemplate TargetType='ToggleButton'><Border Background='#303A4B' BorderBrush='#46536B' BorderThickness='1' CornerRadius='5'/></ControlTemplate></ToggleButton.Template></ToggleButton>
+<ContentPresenter IsHitTestVisible='False' Content='{TemplateBinding SelectionBoxItem}' ContentTemplate='{TemplateBinding SelectionBoxItemTemplate}' Margin='8,6,25,6' VerticalAlignment='Center'/><Path IsHitTestVisible='False' Data='M 0 0 L 4 4 L 8 0' Stroke='#AAB3C2' StrokeThickness='1.5' HorizontalAlignment='Right' VerticalAlignment='Center' Margin='0,0,9,0'/>
+<Popup x:Name='PART_Popup' Placement='Bottom' IsOpen='{TemplateBinding IsDropDownOpen}' AllowsTransparency='True' Focusable='False'><Border Background='#252D3B' BorderBrush='#46536B' BorderThickness='1' CornerRadius='5' MinWidth='{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}'><ScrollViewer MaxHeight='220'><StackPanel IsItemsHost='True'/></ScrollViewer></Border></Popup>
+</Grid></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='Slider'><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Slider'><Grid MinHeight='24'><Track x:Name='PART_Track' Minimum='{TemplateBinding Minimum}' Maximum='{TemplateBinding Maximum}' Value='{TemplateBinding Value}' IsDirectionReversed='{TemplateBinding IsDirectionReversed}'>
+<Track.DecreaseRepeatButton><RepeatButton Command='{x:Static Slider.DecreaseLarge}' Focusable='False'><RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Height='4' Background='#6C9EE8' CornerRadius='2'/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+<Track.IncreaseRepeatButton><RepeatButton Command='{x:Static Slider.IncreaseLarge}' Focusable='False'><RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Height='4' Background='#46536B' CornerRadius='2'/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
+<Track.Thumb><Thumb Width='12' Height='12'><Thumb.Template><ControlTemplate TargetType='Thumb'><Border Background='#DCE8FA' CornerRadius='6'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+</Track></Grid></ControlTemplate></Setter.Value></Setter></Style>
+</ResourceDictionary>");
+    }
     static void OpenSettings() {
         if (settingsOpen) return;
         settingsOpen = true; collapseTimer.Stop(); DismissWelcome(false);
-        var dialog = new Window { Width = 360, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
+        var dialog = new Window { Width = 410, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
             Owner = checking ? null : window, WindowStartupLocation = WindowStartupLocation.CenterOwner, Topmost = true,
-            Background = new SolidColorBrush(Color.FromRgb(27,33,48)), Foreground = Brushes.WhiteSmoke,
+            Background = new SolidColorBrush(Color.FromRgb(32,36,44)), Foreground = Brushes.WhiteSmoke,
             FontFamily = new FontFamily("Microsoft YaHei UI"), FontSize = 12, ShowInTaskbar = false };
         settingsWindow = dialog;
+        dialog.Resources=SettingsStyles();
         var panel = new StackPanel { Margin = new Thickness(18) };
         dialog.Content = new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
         var languageLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(languageLabel);
         var language = new ComboBox { SelectedIndex = english ? 1 : 0, Margin = new Thickness(0,0,0,16) };
         language.Items.Add("中文"); language.Items.Add("English"); panel.Children.Add(language);
         var scaleLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(scaleLabel);
-        var scaleRow = new Grid(); scaleRow.ColumnDefinitions.Add(new ColumnDefinition()); scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(66) }); scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+        var scaleRow = new Grid {Margin=new Thickness(0,0,0,12)}; scaleRow.ColumnDefinitions.Add(new ColumnDefinition()); scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(66) }); scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         var slider = new Slider { Minimum = 40, Maximum = 150, Value = zoom * 100, TickFrequency = 1, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0,0,12,0) };
-        var input = new TextBox { Text = (zoom * 100).ToString("0",CultureInfo.InvariantCulture), Padding = new Thickness(5), VerticalContentAlignment = VerticalAlignment.Center };
+        var input = new TextBox { Text = (zoom * 100).ToString("0",CultureInfo.InvariantCulture), Padding = new Thickness(7,5,7,5), VerticalContentAlignment = VerticalAlignment.Center,Background=new SolidColorBrush(Color.FromRgb(48,58,75)),Foreground=Brushes.WhiteSmoke,BorderThickness=new Thickness(0) };
         var percent = new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4,0,0,0) };
         scaleRow.Children.Add(slider); Grid.SetColumn(input,1); scaleRow.Children.Add(input); Grid.SetColumn(percent,2); scaleRow.Children.Add(percent); panel.Children.Add(scaleRow);
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,14), Foreground = Brushes.LightSlateGray }; panel.Children.Add(note);
+        var thresholdLabel=new TextBlock();
+        var commitThreshold=AddNumberSetting(panel,thresholdLabel,40,150,textThreshold*100,"%",value=>{textThreshold=value/100;Render();SaveDisplayOptions();});
+        var widthLabel=new TextBlock();
+        var commitWidth=AddNumberSetting(panel,widthLabel,100,480,baseWidth,"px",value=>{baseWidth=value;Render();SaveDisplayOptions();});
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
         var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
         var placementLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(placementLabel);
@@ -345,10 +482,26 @@ class QuotaWidget
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var done = new Button { Padding = new Thickness(10,5,10,5), IsCancel = true };
         actions.Children.Add(done); panel.Children.Add(actions);
+        var sizeHeading=new TextBlock(); var appearanceHeading=new TextBlock(); var toolbarHeading=new TextBlock();
+        var toolbarElements=panel.Children.Cast<UIElement>().SkipWhile(element=>element!=toolbarOption).TakeWhile(element=>element!=actions).ToArray();
+        panel.Children.Clear();
+        var settingsHeading=new TextBlock {FontSize=20,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,16)};panel.Children.Add(settingsHeading);
+        Action<TextBlock,UIElement[]> group=(heading,elements)=>{
+            heading.Foreground=new SolidColorBrush(Color.FromRgb(145,167,199));heading.FontWeight=FontWeights.Bold;heading.Margin=new Thickness(0,0,0,8);panel.Children.Add(heading);
+            var content=new StackPanel {Margin=new Thickness(14)};
+            foreach(var element in elements) content.Children.Add(element);
+            panel.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,16),Child=content});
+        };
+        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag,note});
+        group(appearanceHeading,new UIElement[]{languageLabel,language,colors});
+        group(toolbarHeading,toolbarElements);panel.Children.Add(actions);
         Action labels = () => {
             dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言", "Language");
+            settingsHeading.Text=dialog.Title;sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("语言与外观","Language and appearance");toolbarHeading.Text=Text("按钮布局","Toolbar layout");
             scaleLabel.Text = Text("缩放比例", "Scale");
-            note.Text = Text("40%–150% · 支持滚轮缩放。低于 80% 时隐藏文字。修改自动保存。", "40%–150% · Mouse wheel supported. Text is hidden below 80%. Changes save automatically.");
+            note.Text = Text("支持滚轮缩放。低于 60% 时文字可能难以辨认，建议只看条形。空间不足时自动隐藏文字。修改自动保存。", "Mouse wheel supported. Text may be hard to read below 60%; bars are recommended. Text hides when space is insufficient. Changes save automatically.");
+            thresholdLabel.Text=Text("文字隐藏阈值", "Hide text below");
+            widthLabel.Text=Text("窗口宽度（100% 缩放时）", "Window width (at 100% scale)");
             colors.Content = Text("配色设置…", "Colors…"); done.Content = Text("完成", "Done");
             toolbarOption.Content = Text("收起时保留按钮", "Keep toolbar buttons when collapsed");
             placementLabel.Text = Text("按钮栏位置", "Toolbar placement");
@@ -387,10 +540,23 @@ class QuotaWidget
         input.LostKeyboardFocus += (s,e) => commit();
         input.KeyDown += (s,e) => { if (e.Key == System.Windows.Input.Key.Enter) { commit(); e.Handled = true; } };
         colors.Click += (s,e) => OpenAppearance();
-        done.Click += (s,e) => { commit(); dialog.Close(); };
+        done.Click += (s,e) => { commit(); commitThreshold(); commitWidth(); dialog.Close(); };
         try {
             if (checking) {
                 double before = zoom; bool wasEnglish = english;
+                double oldThreshold=textThreshold,oldWidth=baseWidth;
+                var numberRows=new[]{scaleRow,(Grid)thresholdLabel.Tag,(Grid)widthLabel.Tag};
+                var thresholdInput=numberRows[1].Children.OfType<TextBox>().Single();
+                var widthInput=numberRows[2].Children.OfType<TextBox>().Single();
+                numberRows[1].Children.OfType<Slider>().Single().Value=60;
+                numberRows[2].Children.OfType<Slider>().Single().Value=480;
+                if(textThreshold!=0.6 || baseWidth!=480) throw new Exception("Display sliders failed.");
+                thresholdInput.Text="not a number";commitThreshold();
+                if(textThreshold!=0.6 || thresholdInput.BorderBrush!=Brushes.OrangeRed) throw new Exception("Invalid threshold accepted.");
+                thresholdInput.Text="75%";commitThreshold();widthInput.Text="300";commitWidth();
+                if(textThreshold!=0.75 || baseWidth!=300) throw new Exception("Display numeric input failed.");
+                thresholdInput.Text=(oldThreshold*100).ToString("0",CultureInfo.InvariantCulture);commitThreshold();
+                widthInput.Text=oldWidth.ToString("0",CultureInfo.InvariantCulture);commitWidth();
                 bool previousPin = pinIcons;
                 toolbarOption.IsChecked = !previousPin;
                 if (pinIcons == previousPin) throw new Exception("Toolbar setting did not update.");
@@ -413,8 +579,8 @@ class QuotaWidget
                 language.SelectedIndex = wasEnglish ? 1 : 0;
                 colors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 SetZoom(before);
-                panel.Measure(new Size(324,double.PositiveInfinity)); panel.Arrange(new Rect(panel.DesiredSize)); panel.UpdateLayout();
-                var bitmap = new RenderTargetBitmap(360,(int)Math.Ceiling(panel.DesiredSize.Height+36),96,96,PixelFormats.Pbgra32);
+                panel.Measure(new Size(dialog.Width-36,double.PositiveInfinity)); panel.Arrange(new Rect(panel.DesiredSize)); panel.UpdateLayout();
+                var bitmap = new RenderTargetBitmap((int)dialog.Width,(int)Math.Ceiling(panel.DesiredSize.Height+36),96,96,PixelFormats.Pbgra32);
                 var drawing = new DrawingVisual(); using (var context = drawing.RenderOpen()) { context.DrawRectangle(dialog.Background,null,new Rect(0,0,bitmap.PixelWidth,bitmap.PixelHeight)); context.PushTransform(new TranslateTransform(18,18)); context.DrawRectangle(new VisualBrush(panel),null,new Rect(panel.RenderSize)); }
                 bitmap.Render(drawing); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                 using (var stream = File.Create(settingsPreviewPath)) encoder.Save(stream);
@@ -679,7 +845,12 @@ class QuotaWidget
             if (!File.Exists(ThemeFile())) return;
             var saved = new JavaScriptSerializer().Deserialize<Dictionary<string,string>>(File.ReadAllText(ThemeFile()));
             foreach (string key in Theme.Keys) if (saved != null && saved.ContainsKey(key) && Theme.Valid(saved[key])) Theme.Colors[key] = saved[key];
+            UpgradeLegacyContrast();
         } catch (IOException) { } catch (UnauthorizedAccessException) { } catch (ArgumentException) { }
+    }
+    static void UpgradeLegacyContrast() {
+        if(string.Equals(Theme.Colors["track"],"#303640",StringComparison.OrdinalIgnoreCase)) Theme.Colors["track"]="#414B5B";
+        if(string.Equals(Theme.Colors["barBorder"],"#15181E",StringComparison.OrdinalIgnoreCase)) Theme.Colors["barBorder"]="#77859B";
     }
     static IEnumerable<DependencyObject> Children(DependencyObject root) {
         for (int i=0;i<VisualTreeHelper.GetChildrenCount(root);i++) {
@@ -795,7 +966,7 @@ class QuotaWidget
         catch (UnauthorizedAccessException) { Control<Button>("SettingsButton").ToolTip = Text("语言偏好无法保存", "Could not save language preference"); }
     }
     static void ApplyLanguage() {
-        window.Title = Text("Codex 额度", "Codex Usage");
+        window.Title = Text("额度", "Usage");
         Control<TextBlock>("TitleLabel").Text = window.Title;
         Control<TextBlock>("HourLabel").Text = Text("5 小时剩余", "5-hour remaining");
         Control<TextBlock>("WeekLabel").Text = Text("本周剩余", "Weekly remaining");
@@ -875,8 +1046,6 @@ class QuotaWidget
         Control<Button>("LockButton").Click += (s, e) => ToggleLock();
         Control<Button>("SettingsButton").Click += (s, e) => OpenSettings();
         Control<Button>("CloseButton").Click += (s,e) => window.Close();
-        window.LocationChanged += (s,e) => { if (settingsWindow != null && settingsWindow.IsVisible) PositionSettings(settingsWindow); };
-        window.SizeChanged += (s,e) => { if (settingsWindow != null && settingsWindow.IsVisible) PositionSettings(settingsWindow); };
         window.MouseLeftButtonDown += (s, e) => {
             var source = e.OriginalSource as DependencyObject;
             while (source != null) {
@@ -961,15 +1130,21 @@ class QuotaWidget
         if (baseline != null && candidate.Time <= baseline.Time) return current;
         DateTimeOffset hourTime = current.HourTime == default(DateTimeOffset) ? current.Time : current.HourTime;
         DateTimeOffset weekTime = current.WeekTime == default(DateTimeOffset) ? current.Time : current.WeekTime;
-        bool hour = AcceptLocalLimit(current.Hour, candidate.Hour, hourTime, candidate.Time,
+        DateTimeOffset candidateHourTime = candidate.HourTime == default(DateTimeOffset) ? candidate.Time : candidate.HourTime;
+        DateTimeOffset candidateWeekTime = candidate.WeekTime == default(DateTimeOffset) ? candidate.Time : candidate.WeekTime;
+        if (baseline != null) {
+            if (hourTime < baseline.Time) hourTime = baseline.Time;
+            if (weekTime < baseline.Time) weekTime = baseline.Time;
+        }
+        bool hour = AcceptLocalLimit(current.Hour, candidate.Hour, hourTime, candidateHourTime,
             baseline == null || baseline.Hour != null);
-        bool week = AcceptLocalLimit(current.Week, candidate.Week, weekTime, candidate.Time,
+        bool week = AcceptLocalLimit(current.Week, candidate.Week, weekTime, candidateWeekTime,
             baseline == null || baseline.Week != null);
         if (!hour && !week) return current;
         return new Snapshot {
             Time = candidate.Time, Live = false, LiveBaseline = baseline,
             Hour = hour ? candidate.Hour : current.Hour, Week = week ? candidate.Week : current.Week,
-            HourTime = hour ? candidate.Time : hourTime, WeekTime = week ? candidate.Time : weekTime
+            HourTime = hour ? candidateHourTime : hourTime, WeekTime = week ? candidateWeekTime : weekTime
         };
     }
     static bool AcceptLocalLimit(Limit current, Limit candidate, DateTimeOffset observed,
@@ -977,8 +1152,11 @@ class QuotaWidget
         if (!available || candidate == null || timestamp <= observed) return false;
         if (current == null) return true;
         // Log timestamps can advance while their embedded rate-limit data is cached.
-        if (current.Reset > 0 && candidate.Reset < current.Reset) return false;
-        if (candidate.Reset > current.Reset) return true;
+        // Account and cached records can round the same reset boundary differently.
+        // A one-second drift is not a new 5-hour/week cycle.
+        if (current.Reset > 0 && candidate.Reset == 0) return false;
+        if (current.Reset > 0 && candidate.Reset < current.Reset - 2) return false;
+        if (candidate.Reset > current.Reset + 2) return true;
         return candidate.Remaining <= current.Remaining;
     }
     static void CheckSnapshotSelection(string report) {
@@ -1040,8 +1218,11 @@ class QuotaWidget
         object used = Value(map, "used_percent") ?? Value(map, "usedPercent");
         object reset = Value(map, "resets_at") ?? Value(map, "resetsAt");
         if (used == null) return null;
-        return new Limit { Remaining = Math.Max(0, Math.Min(100, 100 - Convert.ToDouble(used))),
-            Reset = reset == null ? 0 : Convert.ToInt64(reset) };
+        double usedPercent = Convert.ToDouble(used);
+        if (double.IsNaN(usedPercent) || double.IsInfinity(usedPercent)) throw new FormatException("Invalid usage percentage.");
+        long resetSeconds = reset == null ? 0 : Convert.ToInt64(reset);
+        if (resetSeconds != 0) DateTimeOffset.FromUnixTimeSeconds(resetSeconds);
+        return new Limit { Remaining = Math.Max(0, Math.Min(100, 100 - usedPercent)), Reset = resetSeconds };
     }
     static Snapshot ParseWindows(Dictionary<string,object> limits, DateTimeOffset timestamp, bool live) {
         var result = new Snapshot { Time = timestamp, Live = live };
@@ -1055,18 +1236,23 @@ class QuotaWidget
         return result;
     }
     static Snapshot ReadSnapshot() {
-        string profile = Environment.GetEnvironmentVariable("USERPROFILE");
+        return ReadSnapshotFrom(Environment.GetEnvironmentVariable("USERPROFILE"));
+    }
+    static Snapshot ReadSnapshotFrom(string profile) {
         if (string.IsNullOrEmpty(profile)) profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string home = Path.Combine(profile, ".codex");
         diagnostic = "Profile: " + home;
         var files = new List<FileInfo>();
+        int errors = 0;
+        localReadWarning = "";
         foreach (string folder in new[] { "sessions", "archived_sessions" }) {
             string root = Path.Combine(home, folder);
             if (!Directory.Exists(root)) continue;
             try { files.AddRange(Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories).Select(p => new FileInfo(p))); }
-            catch (IOException ex) { diagnostic += "\r\n" + ex.Message; } catch (UnauthorizedAccessException ex) { diagnostic += "\r\n" + ex.Message; }
+            catch (IOException) { errors++; } catch (UnauthorizedAccessException) { errors++; }
         }
         Snapshot latest = null;
+        var records = new List<Snapshot>();
         diagnostic += "\r\nFiles: " + files.Count;
         var json = new JavaScriptSerializer { MaxJsonLength = 1048576 };
         foreach (var file in files.OrderByDescending(f => f.LastWriteTimeUtc).Take(16)) {
@@ -1086,13 +1272,22 @@ class QuotaWidget
                                 if (id != null && id != "codex") continue;
                                 if (limits == null) continue;
                                 var time = DateTimeOffset.Parse((string)Value(record, "timestamp"), CultureInfo.InvariantCulture);
-                                if (latest == null || time > latest.Time) latest = ParseWindows(limits, time, false);
-                            } catch (ArgumentException ex) { diagnostic += "\r\nParse: " + ex.Message; } catch (FormatException ex) { diagnostic += "\r\nParse: " + ex.Message; } catch (InvalidCastException ex) { diagnostic += "\r\nParse: " + ex.Message; }
+                                var candidate = ParseWindows(limits, time, false);
+                                if (candidate.Hour != null || candidate.Week != null) records.Add(candidate);
+                            } catch (ArgumentException) { errors++; } catch (FormatException) { errors++; }
+                            catch (InvalidCastException) { errors++; } catch (InvalidOperationException) { errors++; }
+                            catch (OverflowException) { errors++; }
                         }
                     }
                 }
-            } catch (IOException ex) { diagnostic += "\r\n" + ex.Message; } catch (UnauthorizedAccessException ex) { diagnostic += "\r\n" + ex.Message; }
+            } catch (IOException) { errors++; } catch (UnauthorizedAccessException) { errors++; }
         }
+        // Select each quota window independently; an incomplete newer event must not hide
+        // a valid older hourly record in a different file.
+        foreach (var record in records.OrderBy(r => r.Time)) latest = NewerSnapshot(latest, record);
+        if (errors > 0) localReadWarning = "Local read skipped " + errors + " unreadable file(s)/record(s).";
+        diagnostic += "\r\nValid quota records: " + records.Count + "\r\n" + localReadWarning;
+        if (latest == null && errors > 0) throw new InvalidDataException(localReadWarning);
         return latest;
     }
     static string ResetText(Limit limit) {
@@ -1144,6 +1339,11 @@ class QuotaWidget
     }
     static T Control<T>(string name) where T : class { return window.FindName(name) as T; }
     static void ShowLimit(string prefix, bool show) {
+        if(prefix=="Week") {
+            Control<Grid>("WeekPair").Visibility=show ? Visibility.Visible : Visibility.Collapsed;
+            Control<ProgressBar>("CompactWeekGap").Visibility=show ? Visibility.Visible : Visibility.Collapsed;
+            Control<ProgressBar>("CompactWeekMarker").Visibility=show ? Visibility.Visible : Visibility.Collapsed;
+        }
         foreach (string suffix in new[] { "Info", "Bar", "TimeBar" }) Control<FrameworkElement>(prefix+suffix).Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         foreach (string suffix in new[] { "Label", "Bar", "TimeBar" }) Control<FrameworkElement>("Compact"+prefix+suffix).Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         var rows = Control<Grid>("Compact").RowDefinitions;
@@ -1157,13 +1357,49 @@ class QuotaWidget
         Control<ProgressBar>(prefix+"Bar").Value = Control<ProgressBar>("Compact"+prefix+"Bar").Value = limit.Remaining;
         Control<TextBlock>(prefix+"Reset").Text = Control<TextBlock>("Compact"+prefix+"Reset").Text = CompactReset(limit);
         StyleQuota(prefix,limit,hours);
+        if(prefix=="Week") foreach(string name in new[]{"WeekBar","CompactWeekBar","WeekTimeBar","CompactWeekTimeBar","WeekGap","CompactWeekGap","WeekMarker","CompactWeekMarker"}) {
+            Control<ProgressBar>(name).DataContext=WeeklyDayMarker(limit.Reset,DateTimeOffset.UtcNow);
+        }
+    }
+    static double WeeklyDayMarker(long reset, DateTimeOffset now) {
+        if(reset<=0) return -1;
+        double days=(DateTimeOffset.FromUnixTimeSeconds(reset)-now).TotalDays;
+        if(days<=0 || days>7) return -1;
+        return Math.Max(0,Math.Min(6,Math.Ceiling(days)-1))/7;
+    }
+    static bool DataIsStale() { return DataIsStaleAt(DateTimeOffset.UtcNow); }
+    static bool DataIsStaleAt(DateTimeOffset now) {
+        if (snapshot == null) return false;
+        return (snapshot.Hour != null && (now - (snapshot.HourTime == default(DateTimeOffset) ? snapshot.Time : snapshot.HourTime)).TotalMinutes >= 5)
+            || (snapshot.Week != null && (now - (snapshot.WeekTime == default(DateTimeOffset) ? snapshot.Time : snapshot.WeekTime)).TotalMinutes >= 5);
+    }
+    static bool ShouldAutoQuery(DateTimeOffset now) {
+        return !reading && (snapshot == null || DataIsStaleAt(now)) && (now-lastActiveCompleted).TotalMinutes>=5;
+    }
+    static void UpdateRefreshStatus() {
+        string state=activeReading ? "querying" : queryFailed || localReadWarning.Length>0 ? "failed" : snapshot==null || DataIsStale() ? "stale" : "normal";
+        var button=Control<Button>("RefreshButton");
+        string hex=state=="querying" ? "#70B8FF" : state=="failed" ? "#B95F6A" : state=="stale" ? "#C17D4D" : Theme.Colors["icons"];
+        var color=(Color)ColorConverter.ConvertFromString(hex);
+        button.Resources["ToolbarNormal"]=new SolidColorBrush(color);
+        button.Resources["ToolbarHover"]=LightenIcon(color,0.35);
+        button.Resources["ToolbarPressed"]=LightenIcon(color,0.65);
+        button.Tag=state;
+        button.ToolTip=Text(state=="querying" ? "正在查询账户额度" : state=="failed" ? "查询或读取失败，点击重试" : state=="stale" ? "额度可能过期，点击查询" : "主动查询最新账户额度",
+            state=="querying" ? "Querying account usage" : state=="failed" ? "Query/read failed; click to retry" : state=="stale" ? "Usage may be stale; click to query" : "Query current account usage")
+            +(snapshot==null ? "" : "\n"+Text("数据时间：","Data timestamp: ")+snapshot.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
     }
     static void Render() {
         ShowLimit("Hour",snapshot != null && snapshot.Hour != null);
         ShowLimit("Week",snapshot != null && snapshot.Week != null);
+        UpdateRefreshStatus();
         Control<TextBlock>("EmptyUsage").Visibility = snapshot == null || (snapshot.Hour == null && snapshot.Week == null) ? Visibility.Visible : Visibility.Collapsed;
         Control<TextBlock>("EmptyUsage").Text = Text("暂无额度数据", "No usage limits available");
-        Control<TextBlock>("Updated").Foreground = Theme.Brush(queryFailed || (snapshot != null && (DateTimeOffset.UtcNow - snapshot.Time).TotalMinutes >= 5) ? "alert" : "status");
+        bool warning = queryFailed || localReadWarning.Length > 0 || DataIsStale();
+        Control<TextBlock>("Updated").Foreground = Theme.Brush(warning ? "alert" : "status");
+        // Keep the warning visible even when zoom hides captions and the toolbar.
+        Control<Border>("Root").BorderBrush = Theme.Brush(warning ? "alert" : "windowBorder");
+        Control<Border>("Root").ToolTip = warning ? Text("额度可能不是最新值，请点击刷新核对。", "Usage may be outdated. Click refresh to verify.") + "\n" + localReadWarning : null;
         if (reading) { Control<TextBlock>("Updated").Text = Text("正在读取额度…", "Reading usage…"); ResizeWidget(); return; }
         if (snapshot == null) {
             Control<TextBlock>("HourValue").Text = "—";
@@ -1176,52 +1412,53 @@ class QuotaWidget
         }
         RenderLimit("Hour",snapshot.Hour,5);
         RenderLimit("Week",snapshot.Week,168);
-        Control<TextBlock>("Updated").Text = (queryFailed ? Text("查询失败 · ", "Query failed · ") : snapshot.Live ? Text("账户查询 ", "Account query ") : Text("记录更新 ", "Local record ")) + snapshot.Time.ToLocalTime().ToString("HH:mm:ss")
-            + ((DateTimeOffset.UtcNow - snapshot.Time).TotalMinutes >= 5 ? Text(" · 可能已过期", " · May be stale") : "");
+        Control<TextBlock>("Updated").Text = (queryFailed ? Text("查询失败 · ", "Query failed · ") : localReadWarning.Length > 0 ? Text("本地读取异常 · ", "Local read warning · ") : snapshot.Live ? Text("账户查询 ", "Account query ") : Text("记录更新 ", "Local record ")) + snapshot.Time.ToLocalTime().ToString("HH:mm:ss")
+            + (DataIsStale() ? Text(" · 可能已过期", " · May be stale") : "");
         Control<TextBlock>("Updated").ToolTip = (queryFailed ? Text("主动查询失败，保留上次数据。请确认 Codex 已登录且网络可用。\n", "Query failed; keeping previous data. Check Codex sign-in and network.\n") : "")
-            + Text("打开和点击刷新时主动查询；每 30 秒只读取本地记录。\n数据时间：", "Queries on launch and refresh; reads local records every 30 seconds.\nData timestamp: ") + snapshot.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            + Text("打开、点击刷新及数据过期时主动查询；每 15 秒读取本地记录，自动查询间隔至少 5 分钟。\n数据时间：", "Queries on launch, refresh and stale data; local reads every 15 seconds, automatic queries at least 5 minutes apart.\nData timestamp: ") + snapshot.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            + "\n" + localReadWarning;
         ResizeWidget();
     }
     static async void Refresh(bool active) {
         if (reading) return;
         reading = true;
+        activeReading=active;
         Control<Button>("RefreshButton").IsEnabled = false;
+        UpdateRefreshStatus();
         if (active) Control<TextBlock>("Updated").Text = Text("正在查询账户额度…", "Querying account usage…");
         try {
             bool fallback = false;
             try {
                 var candidate = await Task.Run(() => active ? QuerySnapshot() : ReadSnapshot());
-                snapshot = NewerSnapshot(snapshot, candidate);
-                if (active) { queryFailed = false; queryError = ""; }
+                var selected = NewerSnapshot(snapshot, candidate);
+                if (!active && candidate != null && snapshot != null && selected == snapshot && candidate.Time > snapshot.Time
+                    && ((candidate.Hour != null && snapshot.Hour != null && candidate.Hour.Remaining < snapshot.Hour.Remaining)
+                    || (candidate.Week != null && snapshot.Week != null && candidate.Week.Remaining < snapshot.Week.Remaining)))
+                    localReadWarning = "Newer local usage rejected by reset/time protection. Please query the account.";
+                snapshot = selected;
+                if (active) { queryFailed = false; queryError = ""; localReadWarning = ""; }
             } catch (Exception ex) {
                 if (active) { queryFailed = true; queryError = ex.Message; fallback = true; }
+                else localReadWarning = "Local read failed: " + ex.GetType().Name;
             }
             if (fallback) {
                 try { snapshot = NewerSnapshot(snapshot, await Task.Run(() => ReadSnapshot())); } catch (Exception) { }
             }
         }
-        finally { reading = false; Control<Button>("RefreshButton").IsEnabled = true; Render(); }
+        finally {
+            if(active) lastActiveCompleted=DateTimeOffset.UtcNow;
+            activeReading=false;
+            reading = false; Control<Button>("RefreshButton").IsEnabled = true; Render();
+            if(!active && ShouldAutoQuery(DateTimeOffset.UtcNow)) Refresh(true);
+        }
     }
     static void SavePreview(string path) {
-        var root = Control<Border>("Root");
-        var size = new Size(window.Width, window.Height);
-        window.Content = null;
-        root.LayoutTransform = Transform.Identity;
-        root.Measure(new Size(360, double.PositiveInfinity));
-        var baseSize = new Size(360, root.DesiredSize.Height);
-        root.Arrange(new Rect(baseSize)); root.UpdateLayout();
-        var unscaled = new RenderTargetBitmap((int)Math.Ceiling(baseSize.Width), (int)Math.Ceiling(baseSize.Height), 96, 96, PixelFormats.Pbgra32);
-        unscaled.Render(root);
-        var bitmap = new RenderTargetBitmap((int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
-        var visual = new DrawingVisual();
-        using (var context = visual.RenderOpen()) {
-            context.DrawImage(unscaled, new Rect(0, 0, baseSize.Width * zoom, baseSize.Height * zoom));
-        }
-        bitmap.Render(visual);
-        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using (var output = File.Create(path)) encoder.Save(output);
-        window.Content = root;
-        ResizeWidget();
+        window.UpdateLayout();
+        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(window.Width),(int)Math.Ceiling(window.Height),96,96,PixelFormats.Pbgra32);
+        double opacity=window.Opacity;window.Opacity=1;
+        try {bitmap.Render(window);} finally {window.Opacity=opacity;}
+        var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using(var output=File.Create(path)) encoder.Save(output);
     }
     static void CheckUi(string report) {
         var originalColors = new Dictionary<string,string>(Theme.Colors);
@@ -1337,13 +1574,239 @@ class QuotaWidget
         if (snapshot.Hour == null || snapshot.Week != null) throw new Exception("Hourly-only parse failed.");
         File.WriteAllText(report, "PASS: nullable quotas, primary weekly-window classification, hourly-only local format, weekly-only layout, no-limits message; color preview, invalid-color rejection, defaults, JSON roundtrip, cancellation; settings language selection, slider and numeric scale input, invalid input, welcome bubble construction; hover collapse/expand, colors, wheel events at 40/75/80/100/150 percent in both languages and both modes, scale limits, anchored resizing and no vertical clipping.\r\nOffline previews generated. No network calls or preference writes.\r\nLive Pro account query, physical color picker, mouse dragging, welcome popup placement and saved-preference reload not exercised by this offline check.\r\n");
     }
+    static void CheckLocalReader(string report) {
+        string fixture = Path.Combine(Path.GetDirectoryName(report), "reader-fixture");
+        string sessions = Path.Combine(fixture,".codex","sessions");
+        Directory.CreateDirectory(sessions);
+        var now = DateTimeOffset.UtcNow;
+        long reset = now.ToUnixTimeSeconds()+18000;
+        Func<int,string,string> record = (seconds,limits) => "{\"timestamp\":\""+now.AddSeconds(seconds).ToString("o")+"\",\"payload\":{\"rate_limits\":"+limits+"}}";
+        string hourly90 = "{\"primary\":{\"used_percent\":10,\"window_minutes\":300,\"resets_at\":"+reset+"}}";
+        string hourly5 = "{\"primary\":{\"used_percent\":95,\"window_minutes\":300,\"resets_at\":"+reset+"}}";
+        string weekly = "{\"secondary\":{\"used_percent\":38,\"window_minutes\":10080,\"resets_at\":"+(reset+604800)+"}}";
+        File.WriteAllLines(Path.Combine(sessions,"hour.jsonl"),new[] {
+            record(-30,hourly90), "{\"rate_limits\": broken", record(-10,hourly5),
+            record(-5,"{\"primary\":{\"used_percent\":80,\"resets_at\":9223372036854775807}}") });
+        File.WriteAllLines(Path.Combine(sessions,"week.jsonl"),new[] {
+            record(-3,weekly), record(-1,"{\"primary\":null,\"secondary\":null}") });
+        snapshot = ReadSnapshotFrom(fixture);
+        if (snapshot == null || snapshot.Hour == null || snapshot.Hour.Remaining != 5 || snapshot.Week == null || snapshot.Week.Remaining != 62)
+            throw new Exception("Malformed/incomplete records blocked independent quota updates.");
+        if (localReadWarning.Length == 0) throw new Exception("Skipped records were not reported.");
+        if (snapshot.HourTime != now.AddSeconds(-10) || snapshot.WeekTime != now.AddSeconds(-3))
+            throw new Exception("Independent record timestamps were replaced by newest overall time.");
+        var roundedLive = new Snapshot {Time=now.AddSeconds(-20),Live=true,
+            Hour=new Limit {Remaining=90,Reset=reset+1}};
+        var roundedLocal = new Snapshot {Time=now.AddSeconds(-10),
+            Hour=new Limit {Remaining=5,Reset=reset}};
+        var roundedSelected = NewerSnapshot(roundedLive,roundedLocal);
+        if (roundedSelected.Hour.Remaining != 5) throw new Exception("One-second earlier reset froze usage updates.");
+        roundedLocal = new Snapshot {Time=now,Hour=new Limit {Remaining=92,Reset=reset+1}};
+        if (NewerSnapshot(roundedSelected,roundedLocal).Hour.Remaining != 5)
+            throw new Exception("One-second later reset resurrected cached balance.");
+        var live = new Snapshot { Time=now.AddSeconds(-8), Live=true,
+            Hour=new Limit {Remaining=90,Reset=reset}, Week=new Limit {Remaining=70,Reset=reset+604800} };
+        var merged = NewerSnapshot(live,snapshot);
+        if (merged.Hour.Remaining != 90 || merged.Week.Remaining != 62)
+            throw new Exception("Weekly timestamp allowed pre-query hourly data to overwrite a live read.");
+        foreach (double scale in new[] {0.4,0.75,1.0}) {
+            SetZoom(scale); SetExpanded(false); Render();
+            if (Control<Border>("Root").ToolTip == null || !Control<TextBlock>("Updated").Text.Contains("warning"))
+                throw new Exception("Collapsed read warning missing.");
+            SavePreview(Path.Combine(Path.GetDirectoryName(report),"read-warning-"+(int)(scale*100)+".png"));
+        }
+        localReadWarning="";
+        snapshot.HourTime = now.AddMinutes(-6); snapshot.WeekTime = now;
+        Render();
+        if (!DataIsStale() || Control<Border>("Root").ToolTip == null) throw new Exception("Recent weekly data hid stale hourly data.");
+        snapshot.HourTime = now; Render();
+        if (DataIsStale() || Control<Border>("Root").ToolTip != null) throw new Exception("Healthy data did not clear warning.");
+        File.WriteAllLines(Path.Combine(sessions,"hour.jsonl"),new[]{"{\"rate_limits\": broken"});
+        File.WriteAllText(Path.Combine(sessions,"week.jsonl"),"");
+        bool failed=false;
+        try { ReadSnapshotFrom(fixture); } catch (InvalidDataException) { failed=true; }
+        if (!failed) throw new Exception("All-bad records silently returned no data.");
+        File.WriteAllText(report,"PASS: one-second reset drift accepts 90% to 5% and rejects cached 92%; malformed JSON and invalid reset isolation; newer weekly-only/empty events preserve hourly data and per-window timestamps; warnings visible at 40/75/100% collapsed; independent window freshness and warning recovery; all-invalid read reported.\r\nSynthetic records only. No account queries or preference writes. Physical long-running widget not exercised.\r\n");
+    }
+    static void CheckDisplayRefresh(string report) {
+        var now=DateTimeOffset.UtcNow;
+        long weeklyReset=now.ToUnixTimeSeconds()+604800;
+        for(int day=0;day<7;day++) {
+            double marker=WeeklyDayMarker(weeklyReset,DateTimeOffset.FromUnixTimeSeconds(weeklyReset-604800+day*86400+3600));
+            if(Math.Abs(marker-(6-day)/7.0)>0.00001) throw new Exception("Weekly day marker boundary failed.");
+        }
+        if(WeeklyDayMarker(0,now)!=-1 || WeeklyDayMarker(now.ToUnixTimeSeconds()-1,now)!=-1) throw new Exception("Unknown/expired reset marker shown.");
+        snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=38,Reset=now.ToUnixTimeSeconds()+18000},Week=new Limit {Remaining=100,Reset=now.ToUnixTimeSeconds()+604800}};
+        lastActiveCompleted=now;
+        if(ShouldAutoQuery(now.AddMinutes(4.99)) || !ShouldAutoQuery(now.AddMinutes(5))) throw new Exception("Stale threshold/cooldown failed.");
+        reading=true; if(ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Concurrent automatic query allowed.");reading=false;
+        lastActiveCompleted=now.AddMinutes(5);
+        if(ShouldAutoQuery(now.AddMinutes(9.99)) || !ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Failure/manual completion cooldown failed.");
+        snapshot.Time=now.AddMinutes(10);snapshot.HourTime=snapshot.WeekTime=default(DateTimeOffset);
+        if(ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Unchanged successful quota treated as stale.");
+        snapshot.HourTime=now; snapshot.WeekTime=now.AddMinutes(10);
+        if(!ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Weekly update hid stale hourly quota.");
+        snapshot=null; if(!ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Missing data recovery failed.");
+        snapshot=new Snapshot {Time=now}; if(ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Unavailable live windows queried endlessly.");
+        var serializer=new JavaScriptSerializer();
+        ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>("{}"));
+        if(textThreshold!=0.8 || baseWidth!=360) throw new Exception("Old display settings compatibility failed.");
+        ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>(serializer.Serialize(new DisplayOptions {TextThreshold=0.6,Width=480})));
+        if(textThreshold!=0.6 || baseWidth!=480) throw new Exception("Display preference roundtrip failed.");
+        ApplyDisplayOptions(new DisplayOptions {TextThreshold=2,Width=1});
+        if(textThreshold!=1.5 || baseWidth!=100) throw new Exception("Invalid preference bounds failed.");
+        snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=38,Reset=now.ToUnixTimeSeconds()+1800},Week=new Limit {Remaining=72,Reset=now.ToUnixTimeSeconds()+388800}};
+        window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();
+        foreach(bool en in new[]{false,true}) {
+            SelectLanguage(en);
+            foreach(double width in new[]{100.0,165.0,180.0,280.0,360.0,480.0}) foreach(double threshold in new[]{0.4,0.6,0.8,1.0,1.5}) foreach(double scale in new[]{0.4,0.59,0.6,0.79,0.8,1.0,1.5}) foreach(bool top in new[]{false,true}) foreach(bool details in new[]{false,true}) {
+                baseWidth=width;textThreshold=threshold;toolbarTop=top;locked=details;expanded=details;SetZoom(scale);Render();window.UpdateLayout();
+                if(Math.Abs(window.Width-width*scale)>0.1) throw new Exception("Independent width failed.");
+                if(Control<TextBlock>("TitleLabel").Text!=(en ? "Usage" : "额度")) throw new Exception("Title rename failed.");
+                var root=Control<Border>("Root");root.Measure(new Size(window.Width,double.PositiveInfinity));
+                if(root.DesiredSize.Height>window.Height+1) throw new Exception("Display vertically clipped.");
+                if(scale<threshold && (Control<StackPanel>("Details").Visibility!=Visibility.Collapsed || Control<ProgressBar>("CompactWeekBar").Uid!="")) throw new Exception("Threshold not honored while locked.");
+                if(details && scale>=threshold && !DetailsFit()) {
+                    var header=Control<Grid>("HeaderGrid");
+                    if(header.Parent!=Control<Grid>("QuotaArea") || header.Visibility!=Visibility.Visible || Control<TextBlock>("TitleLabel").Visibility!=Visibility.Visible)
+                        throw new Exception("Narrow expansion lost title/time.");
+                    if(Control<TextBlock>("Updated").Text!=snapshot.Time.ToLocalTime().ToString("HH:mm:ss")) throw new Exception("Narrow timestamp missing.");
+                    if(width>=165 && Grid.GetRow(Control<TextBlock>("Updated"))!=0) throw new Exception("Narrow header not aligned on one line.");
+                }
+                foreach(string buttonName in DefaultToolbarOrder) {
+                    var button=Control<Button>(buttonName);var toolbar=Control<Grid>("Toolbar");
+                    var origin=button.TranslatePoint(new Point(0,0),toolbar);
+                    if(origin.X < -1 || origin.X+button.ActualWidth>toolbar.ActualWidth+1) throw new Exception("Narrow toolbar overflow.");
+                }
+                if(((string)Control<ProgressBar>("CompactWeekBar").Tag).Contains("detail")!=(Control<ProgressBar>("CompactWeekBar").Uid.Length==0)) throw new Exception("Hidden text tick rules failed.");
+                foreach(string prefix in new[]{"Hour","Week"}) {
+                    var label=Control<TextBlock>("Compact"+prefix+"Label");var bar=Control<ProgressBar>("Compact"+prefix+"Bar");
+                    double captionSize=width<=200 ? 11 : 13;
+                    double captionStart=width<=200 ? width-18-6-TextWidth(bar.Uid,captionSize,FontWeights.Bold) : (width-18-TextWidth(bar.Uid,captionSize,FontWeights.Bold))/2;
+                    if(label.Visibility==Visibility.Visible && captionStart < 6+TextWidth(label.Text,captionSize,FontWeights.Bold)+(width<=200 ? 8 : 6)) throw new Exception("Label/caption overlap.");
+                    if(scale>=threshold && bar.Uid.Length==0 && TextWidth("72%",13,FontWeights.Bold)<=width-30) throw new Exception("Percentage hidden despite fitting.");
+                }
+                if(scale>=threshold && width==100 && Control<ProgressBar>("CompactWeekBar").Uid!="72%") throw new Exception("Percentage-only fallback failed.");
+                if(scale>=threshold && (width==165 || width==180) && !Control<ProgressBar>("CompactWeekBar").Uid.Contains("·")) throw new Exception("Percent/time fallback failed.");
+                foreach(string name in new[]{"WeekBar","CompactWeekBar","WeekTimeBar","CompactWeekTimeBar"}) {
+                    var bar=Control<ProgressBar>(name);bar.ApplyTemplate();
+                    var visual=Children(bar).OfType<SegmentedVisual>().Single();
+                    if(Math.Abs(visual.DayMarker-4.0/7)>0.001 || !visual.Kind.Contains("week")) throw new Exception("Weekly marker template binding failed.");
+                }
+                foreach(string name in new[]{"WeekGap","CompactWeekGap"}) {
+                    var gap=Control<ProgressBar>(name);gap.ApplyTemplate();var visual=Children(gap).OfType<SegmentedVisual>().Single();
+                    if(visual.Kind!="marker-gap" || Math.Abs(visual.DayMarker-4.0/7)>0.001) throw new Exception("Connected week marker gap missing.");
+                }
+                if(threshold==0.6 && scale==1 && !top) SavePreview(Path.Combine(Path.GetDirectoryName(report),(en?"en":"zh")+"-"+(int)width+(details?"-expanded":"-compact")+".png"));
+            }
+        }
+        baseWidth=360;textThreshold=0.8;toolbarTop=false;locked=false;SetZoom(1);SetExpanded(true);
+        var fixedDialog=new Window {Width=410,Height=300,Opacity=0,ShowActivated=false,ShowInTaskbar=false,WindowStartupLocation=WindowStartupLocation.Manual,Left=-9000,Top=-9000};
+        settingsWindow=fixedDialog;fixedDialog.Show();fixedDialog.UpdateLayout();
+        double fixedLeft=fixedDialog.Left,fixedTop=fixedDialog.Top;
+        foreach(double width in new[]{100.0,180.0,480.0}) {baseWidth=width;SetZoom(1);window.UpdateLayout();if(fixedDialog.Left!=fixedLeft || fixedDialog.Top!=fixedTop) throw new Exception("Settings followed widget resize.");}
+        fixedDialog.Close();settingsWindow=null;baseWidth=360;SetZoom(1);
+        snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=69,Reset=now.ToUnixTimeSeconds()+15000},Week=new Limit {Remaining=93,Reset=now.ToUnixTimeSeconds()+496200}};
+        SelectLanguage(false);baseWidth=180;SetZoom(1);SetExpanded(false);window.UpdateLayout();
+        if(!Control<ProgressBar>("CompactWeekBar").Uid.Contains("·") || Control<TextBlock>("CompactWeekLabel").FontSize!=11) throw new Exception("Long weekly countdown compact case failed.");
+        SavePreview(Path.Combine(Path.GetDirectoryName(report),"zh-180-long-countdown.png"));
+        baseWidth=360;SetZoom(1);SetExpanded(true);
+        foreach(bool en in new[]{false,true}) {SelectLanguage(en);settingsPreviewPath=Path.Combine(Path.GetDirectoryName(report),en?"settings-en.png":"settings-zh.png");Control<Button>("SettingsButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));}
+        File.WriteAllText(report,"PASS: simulated stale/fresh/missing/unavailable data, completion cooldown, single-flight guard; display preference compatibility; bilingual widths100/165/180/280/360/480, thresholds40/60/80/100/150%, zoom40/59/60/79/80/100/150%, toolbar top/bottom and compact/locked-expanded; narrow 11px captions right-aligned with minimum 8px label gap, long weekly countdown; connected weekly marker gap bindings and day boundaries; visible settings remain fixed during widget resize; styled settings numeric controls/language/order construction.\r\nNo network queries or user preference writes. Physical mouse interaction, live failures and restart persistence not exercised.\r\n");
+    }
+    static void CheckAlignedLayout(string report) {
+        var now=DateTimeOffset.UtcNow;var folder=Path.GetDirectoryName(report);
+        foreach(string kind in new[]{"quota-detail","quota-center","quota-week-detail","time"}) {
+            var ticks=new SegmentedVisual {Width=200,Height=20,Kind=kind,Caption="",Value=50,Fill=Brushes.Green};
+            ticks.Measure(new Size(200,20));ticks.Arrange(new Rect(0,0,200,20));ticks.UpdateLayout();
+            var tickBitmap=new RenderTargetBitmap(200,20,96,96,PixelFormats.Pbgra32);tickBitmap.Render(ticks);
+            var lines=FlattenDrawings(VisualTreeHelper.GetDrawing(ticks)).OfType<GeometryDrawing>().Where(d=>d.Geometry is LineGeometry).ToArray();
+            double expectedWidth=kind=="quota-detail" ? 1.5 : kind=="quota-center" ? 3 : kind=="time" ? 3.5 : 2;
+            if(lines.Length!=(kind.Contains("week") ? 6 : 4) || lines.Any(d=>Math.Abs(d.Pen.Thickness-expectedWidth)>0.001)) throw new Exception("Tick count/thickness regression: "+kind);
+        }
+        snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=49,Reset=now.ToUnixTimeSeconds()+14340},Week=new Limit {Remaining=90,Reset=now.ToUnixTimeSeconds()+495540}};
+        window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();
+        foreach(bool en in new[]{false,true}) foreach(bool top in new[]{false,true}) foreach(double width in new[]{100.0,150.0,165.0,180.0,200.0,201.0,280.0,360.0,480.0}) foreach(double scale in new[]{0.4,0.8,1.0,1.5}) foreach(bool details in new[]{false,true}) {
+            SelectLanguage(en);toolbarTop=top;baseWidth=width;expanded=details;textThreshold=0.8;SetZoom(scale);window.UpdateLayout();
+            if(Math.Abs(window.Width-width*scale)>1) throw new Exception("Widget widened: actual="+window.Width+" expected="+(width*scale)+" base="+width+" zoom="+scale+" top="+top+" details="+details);
+            bool full=details && scale>=textThreshold;
+            if((Control<StackPanel>("Details").Visibility==Visibility.Visible)!=full) throw new Exception("Expanded view fell back to compact.");
+            if(Control<TextBlock>("Updated").Visibility!=Visibility.Collapsed || Control<TextBlock>("TopUpdated").Visibility!=Visibility.Collapsed) throw new Exception("Record time still visible.");
+            for(int col=0;col<6;col++) if(Control<Grid>("HourInfo").ColumnDefinitions[col].Width!=Control<Grid>("WeekInfo").ColumnDefinitions[col].Width) throw new Exception("Detail columns misaligned.");
+            foreach(string prefix in new[]{"Hour","Week"}) {
+                var row=Control<Grid>(prefix+"Info");
+                double visibleWidth=row.ColumnDefinitions.Take(5).Sum(column=>column.Width.Value);
+                if(visibleWidth>width-18+0.1) throw new Exception("Detail values overflow.");
+                var value=Control<TextBlock>(prefix+"Value");
+                if(full && value.ActualWidth+0.1<TextWidth(value.Text,13,FontWeights.Bold)) throw new Exception("Percentage clipped.");
+            }
+            var toolbar=Control<Grid>("Toolbar");
+            if(Control<TextBlock>("TitleLabel").FontSize>13 || Control<TextBlock>("TitleLabel").FontWeight!=FontWeights.Bold) throw new Exception("Title does not match percentage typography.");
+            foreach(string name in DefaultToolbarOrder) {
+                var button=Control<Button>(name);var origin=button.TranslatePoint(new Point(0,0),toolbar);
+                if(origin.X < -1 || origin.X+button.ActualWidth>toolbar.ActualWidth+1) throw new Exception("Toolbar overflow.");
+                if(top && full) {
+                    var title=Control<TextBlock>("TitleLabel");var titleOrigin=title.TranslatePoint(new Point(0,0),toolbar);
+                    if(title.Parent!=toolbar || Math.Abs(titleOrigin.Y+title.ActualHeight-origin.Y-button.ActualHeight)>1) throw new Exception("Title/buttons bottom alignment failed.");
+                    if(titleOrigin.X+title.ActualWidth>origin.X+1) throw new Exception("Title/buttons overlap.");
+                }
+            }
+            var ordered=toolbarOrder.Select(name=>Control<Button>(name)).ToArray();
+            for(int i=0;i<ordered.Length-1;i++) {
+                var first=(Viewbox)ordered[i].Content;var next=(Viewbox)ordered[i+1].Content;
+                double gap=(next.TranslatePoint(new Point(0,0),toolbar).X-first.TranslatePoint(new Point(first.ActualWidth,0),toolbar).X)*scale;
+                if(gap>7.1 || gap<0) throw new Exception("Icon visible gaps not compact.");
+            }
+            foreach(string prefix in new[]{"Hour","Week"}) {
+                var bar=Control<ProgressBar>("Compact"+prefix+"Bar");bar.ApplyTemplate();var visual=Children(bar).OfType<SegmentedVisual>().Single();
+                if(visual.Label!=(string)bar.GetValue(SegmentedVisual.LabelProperty)) throw new Exception("Inline label binding failed.");
+                if(Control<TextBlock>("Compact"+prefix+"Label").Visibility!=Visibility.Collapsed) throw new Exception("Old label control still visible.");
+                if(scale<textThreshold && visual.Label.Length>0) throw new Exception("Label ignores text threshold.");
+            }
+            var root=Control<Border>("Root");root.Measure(new Size(window.Width,double.PositiveInfinity));
+            if(root.DesiredSize.Height>window.Height+1) throw new Exception("Vertical clipping.");
+            if(scale==1 && (width==100 || width==180 || width==360)) SavePreview(Path.Combine(folder,(en?"en":"zh")+"-"+(int)width+(top?"-top":"-bottom")+(details?"-expanded":"-compact")+".png"));
+            if(width==150 && scale==1.5 && top) SavePreview(Path.Combine(folder,(en?"en":"zh")+"-150-zoom150"+(details?"-expanded":"-compact")+".png"));
+        }
+        SelectLanguage(false);toolbarTop=true;baseWidth=180;SetZoom(1);SetExpanded(true);window.UpdateLayout();
+        var marker=Control<ProgressBar>("WeekMarker");marker.ApplyTemplate();
+        var markerVisual=Children(marker).OfType<SegmentedVisual>().Single();
+        if(markerVisual.Kind!="week-marker-overlay" || Math.Abs(markerVisual.DayMarker-5.0/7)>0.001) throw new Exception("Single weekly overlay binding failed.");
+        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(marker.ActualWidth),(int)Math.Ceiling(marker.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(markerVisual);
+        int stride=bitmap.PixelWidth*4;var pixels=new byte[stride*bitmap.PixelHeight];bitmap.CopyPixels(pixels,stride,0);
+        int center=(int)Math.Round(marker.ActualWidth*5/7),start=bitmap.PixelHeight-8;
+        for(int y=start;y<bitmap.PixelHeight-1;y++) {
+            bool blue=false;for(int x=Math.Max(0,center-2);x<=Math.Min(bitmap.PixelWidth-1,center+2);x++){int offset=y*stride+x*4;if(pixels[offset+3]>60 && pixels[offset]>pixels[offset+2] && pixels[offset+1]>pixels[offset+2]) blue=true;}
+            if(!blue) throw new Exception("Marker line has a gap at row "+y);
+        }
+        foreach(string state in new[]{"normal","stale","failed","querying"}) {
+            activeReading=state=="querying";queryFailed=state=="failed";snapshot.Time=state=="stale" ? now.AddMinutes(-6) : now;localReadWarning="";Render();window.UpdateLayout();
+            var refresh=Control<Button>("RefreshButton");if((string)refresh.Tag!=state) throw new Exception("Refresh status color state failed.");
+            string expected=state=="normal" ? Theme.Colors["icons"] : state=="stale" ? "#C17D4D" : state=="failed" ? "#B95F6A" : "#70B8FF";
+            if(((SolidColorBrush)refresh.Foreground).Color!=(Color)ColorConverter.ConvertFromString(expected)) throw new Exception("Refresh status brush failed.");
+            SavePreview(Path.Combine(folder,"refresh-"+state+".png"));
+        }
+        activeReading=queryFailed=false;snapshot.Time=now;Render();
+        var oldColors=new Dictionary<string,string>(Theme.Colors);Theme.Colors["track"]="#303640";Theme.Colors["barBorder"]="#15181E";UpgradeLegacyContrast();
+        if(Theme.Colors["track"]!="#414B5B" || Theme.Colors["barBorder"]!="#77859B") throw new Exception("Legacy default contrast migration failed.");
+        Theme.Colors["track"]="#123456";UpgradeLegacyContrast();if(Theme.Colors["track"]!="#123456") throw new Exception("Custom color overwritten.");Theme.Colors=oldColors;ApplyTheme();
+        snapshot.Hour=null;Render();window.UpdateLayout();if(Control<Grid>("WeekPair").Visibility!=Visibility.Visible) throw new Exception("Weekly-only pair hidden.");
+        snapshot.Week=null;Render();window.UpdateLayout();if(Control<Grid>("WeekPair").Visibility!=Visibility.Collapsed || Control<ProgressBar>("CompactWeekMarker").Visibility!=Visibility.Collapsed) throw new Exception("Absent week marker not hidden.");
+        File.WriteAllText(report,"PASS: bilingual, both toolbar placements, widths100/150/165/180/200/201/280/360/480 at40/80/100/150%; expanded layout does not widen or fall back, shared detail columns, hidden timestamps, title font13 bold with narrow fallback, icon visible gaps <=7.1px; inline label template binding and threshold, old text controls hidden, shared drawing baseline; weekly overlay continuity, refresh states, default color migration, nullable visibility.\r\nRealized offline WPF layout and previews. No live queries or preference writes. Physical mouse/restart and live failures not exercised.\r\n");
+    }
+    static IEnumerable<Drawing> FlattenDrawings(Drawing drawing) {
+        if(drawing==null) yield break;
+        var group=drawing as DrawingGroup;
+        if(group!=null) {foreach(var child in group.Children) foreach(var nested in FlattenDrawings(child)) yield return nested;}
+        else yield return drawing;
+    }
     [STAThread]
     static int Main(string[] args) {
         try {
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -1352,9 +1815,14 @@ class QuotaWidget
                 window.Icon = decoder.Frames[0];
             }
             Control<Button>("RefreshButton").Click += (s, e) => Refresh(true);
-            if (!checking) { LoadLanguage(); LoadZoom(); LoadTheme(); LoadToolbarPreference(); }
+            if (!checking) { LoadLanguage(); LoadZoom(); LoadDisplayOptions(); LoadTheme(); LoadToolbarPreference(); }
             ConfigureInteraction();
             ApplyTheme();
+            if(args.Length==2 && args[0]=="--aligned-check") {CheckAlignedLayout(args[1]);window.Close();return 0;}
+            if(args.Length==2 && args[0]=="--display-check") {CheckDisplayRefresh(args[1]);window.Close();return 0;}
+            if (args.Length == 2 && args[0] == "--reader-check") {
+                english=true; ApplyLanguage(); CheckLocalReader(args[1]); window.Close(); return 0;
+            }
             if (args.Length == 2 && args[0] == "--toolbar-check") {
                 CheckToolbarLayout(args[1]); window.Close(); return 0;
             }
@@ -1385,7 +1853,7 @@ class QuotaWidget
             }
             window.Left = SystemParameters.WorkArea.Right - window.Width - 20;
             window.Top = SystemParameters.WorkArea.Bottom - window.Height - 20;
-            var scanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            var scanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
             scanTimer.Tick += (s, e) => Refresh(false);
             var clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
             clockTimer.Tick += (s, e) => Render();

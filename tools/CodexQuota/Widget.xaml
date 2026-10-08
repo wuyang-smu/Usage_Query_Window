@@ -55,8 +55,11 @@
     <TextBlock Text="|" Grid.Column="3" Foreground="#96A3BC" />
     <TextBlock x:Name="WeekReset" Grid.Column="4" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
    </Grid>
-   <ProgressBar x:Name="WeekBar" Height="17" Margin="0,2,0,2" Maximum="100" BorderThickness="0" />
-   <ProgressBar x:Name="WeekTimeBar" Height="5" Maximum="100" BorderThickness="0" />
+   <Grid x:Name="WeekPair" Margin="0,2,0,0"><Grid.RowDefinitions><RowDefinition Height="17" /><RowDefinition Height="2" /><RowDefinition Height="5" /></Grid.RowDefinitions>
+   <ProgressBar x:Name="WeekBar" Height="17" Maximum="100" BorderThickness="0" />
+   <ProgressBar x:Name="WeekGap" Grid.Row="1" Height="2" Maximum="100" BorderThickness="0" IsHitTestVisible="False" />
+   <ProgressBar x:Name="WeekTimeBar" Grid.Row="2" Height="5" Maximum="100" BorderThickness="0" />
+   <ProgressBar x:Name="WeekMarker" Grid.RowSpan="3" Height="24" Maximum="100" BorderThickness="0" IsHitTestVisible="False" Panel.ZIndex="1" /></Grid>
    </StackPanel>
   <Grid x:Name="Compact" Visibility="Collapsed">
    <Grid.RowDefinitions><RowDefinition Height="21" /><RowDefinition Height="7" /><RowDefinition Height="6" /><RowDefinition Height="21" /><RowDefinition Height="7" /></Grid.RowDefinitions>
@@ -67,6 +70,8 @@
    <TextBlock x:Name="CompactWeekLabel" Text="周" Grid.Row="3" Foreground="#F0F3FA" FontSize="13" HorizontalAlignment="Left" Margin="6,0,0,0" TextWrapping="NoWrap" Panel.ZIndex="2" FontWeight="Bold" />
    <ProgressBar x:Name="CompactWeekBar" Grid.Row="3" Height="19" Maximum="100" BorderThickness="0" />
    <ProgressBar x:Name="CompactWeekTimeBar" Grid.Row="3" Grid.RowSpan="2" Height="5" Margin="0,22,0,0" Maximum="100" BorderThickness="0" VerticalAlignment="Top" />
+   <ProgressBar x:Name="CompactWeekGap" Grid.Row="3" Grid.RowSpan="2" Height="2" Margin="0,20,0,0" Maximum="100" BorderThickness="0" VerticalAlignment="Top" IsHitTestVisible="False" />
+   <ProgressBar x:Name="CompactWeekMarker" Grid.Row="3" Grid.RowSpan="2" Height="26" Margin="0,1,0,0" Maximum="100" BorderThickness="0" VerticalAlignment="Top" IsHitTestVisible="False" Panel.ZIndex="1" />
    <TextBlock x:Name="CompactWeekReset" Visibility="Collapsed" />
   </Grid>
   <TextBlock x:Name="EmptyUsage" Text="暂无额度数据" Margin="0,30,0,6" Visibility="Collapsed" /></Grid><Grid x:Name="Toolbar" Grid.Row="1" Background="Transparent" Margin="0,-2,0,0">
