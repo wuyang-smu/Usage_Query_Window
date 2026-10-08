@@ -36,18 +36,19 @@
  <Border x:Name="Root" Background="#20242C" CornerRadius="12" BorderBrush="#444C59" BorderThickness="1" Padding="8,8,8,0">
   <Grid x:Name="LayoutRoot">
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="18" /></Grid.RowDefinitions><Grid x:Name="QuotaArea" Background="Transparent" Margin="0,0,0,0" MinHeight="28"><StackPanel x:Name="Details">
-   <Grid Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock x:Name="TitleLabel" Text="Codex 额度" Foreground="#F0F3FA" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" />
+   <Grid x:Name="HeaderGrid" Margin="0,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock x:Name="TitleLabel" Text="Codex 额度" Foreground="#F0F3FA" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" />
    <TextBlock x:Name="Updated" Foreground="#96A3BC" Margin="6,0,0,0" Grid.Column="1" FontSize="10" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right" />
-  </Grid><Grid x:Name="HourInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+  </Grid><Grid x:Name="HourInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /><ColumnDefinition Width="0" /></Grid.ColumnDefinitions>
     <TextBlock x:Name="HourLabel" Foreground="#F0F3FA" TextWrapping="NoWrap" FontWeight="Bold" FontSize="13" />
     <TextBlock Text="|" Grid.Column="1" Foreground="#96A3BC" />
     <TextBlock x:Name="HourValue" Grid.Column="2" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
     <TextBlock Text="|" Grid.Column="3" Foreground="#96A3BC" />
     <TextBlock x:Name="HourReset" Grid.Column="4" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
+    <TextBlock x:Name="TopUpdated" Grid.Column="5" Margin="6,0,0,0" FontSize="10" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right" Visibility="Collapsed" />
    </Grid>
    <ProgressBar x:Name="HourBar" Height="17" Margin="0,2,0,2" Maximum="100" BorderThickness="0" />
    <ProgressBar x:Name="HourTimeBar" Height="5" Margin="0,0,0,8" Maximum="100" BorderThickness="0" />
-   <Grid x:Name="WeekInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+   <Grid x:Name="WeekInfo"><Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="12" /><ColumnDefinition Width="48" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /><ColumnDefinition Width="0" /></Grid.ColumnDefinitions>
     <TextBlock x:Name="WeekLabel" Foreground="#F0F3FA" TextWrapping="NoWrap" FontWeight="Bold" FontSize="13" />
     <TextBlock Text="|" Grid.Column="1" Foreground="#96A3BC" />
     <TextBlock x:Name="WeekValue" Grid.Column="2" TextWrapping="NoWrap" FontSize="13" FontWeight="Bold" />
@@ -69,7 +70,7 @@
    <TextBlock x:Name="CompactWeekReset" Visibility="Collapsed" />
   </Grid>
   <TextBlock x:Name="EmptyUsage" Text="暂无额度数据" Margin="0,30,0,6" Visibility="Collapsed" /></Grid><Grid x:Name="Toolbar" Grid.Row="1" Background="Transparent" Margin="0,-2,0,0">
- <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+ <Grid.ColumnDefinitions><ColumnDefinition Width="0" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
  <Button x:Name="SettingsButton" Style="{StaticResource ToolbarButtonStyle}" Width="24" Height="18" Padding="0" Margin="0" Background="Transparent" BorderThickness="0" Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" VerticalContentAlignment="Bottom">
   <Viewbox Width="13" Height="13"><Canvas Width="20" Height="20">
    <Path Data="M 8,2 H 12 L 12.5,4.5 L 14,5.4 L 16.4,4.7 L 18.4,8.2 L 16.5,10 L 16.5,11 L 18.4,12.8 L 16.4,16.3 L 14,15.6 L 12.5,16.5 L 12,19 H 8 L 7.5,16.5 L 6,15.6 L 3.6,16.3 L 1.6,12.8 L 3.5,11 L 3.5,10 L 1.6,8.2 L 3.6,4.7 L 6,5.4 L 7.5,4.5 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" StrokeLineJoin="Round" />

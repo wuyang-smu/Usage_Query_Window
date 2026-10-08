@@ -93,6 +93,9 @@ class QuotaWidget
     static DateTime zoomPaintUntil;
     static bool settingsOpen;
     static bool pinIcons = true;
+    static bool toolbarTop;
+    static readonly string[] DefaultToolbarOrder = { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" };
+    static string[] toolbarOrder = (string[])DefaultToolbarOrder.Clone();
     static Window settingsWindow;
     static System.Windows.Controls.Primitives.Popup welcomePopup;
     static void ConfigureSegments() {
@@ -132,6 +135,7 @@ class QuotaWidget
         var root = Control<Border>("Root");
         double right = (double.IsNaN(window.Left) ? 0 : window.Left) + window.Width;
         double bottom = (double.IsNaN(window.Top) ? 0 : window.Top) + window.Height;
+        double top = double.IsNaN(window.Top) ? 0 : window.Top;
         root.LayoutTransform = new ScaleTransform(zoom, zoom);
         window.Width = 360 * zoom;
         // Commit LayoutTransform's internal sizing state before reading DesiredSize.
@@ -143,7 +147,7 @@ class QuotaWidget
         window.Width = 360 * zoom;
         window.Height = Math.Ceiling(root.DesiredSize.Height);
         window.Left = right - window.Width;
-        window.Top = bottom - window.Height;
+        window.Top = toolbarTop ? top : bottom - window.Height;
         window.UpdateLayout();
     }
     static void ChangeZoom(int wheelDelta) {
@@ -165,8 +169,21 @@ class QuotaWidget
         bool showIcons = pinIcons || expanded;
         Control<Grid>("Toolbar").Visibility = showIcons ? Visibility.Visible : Visibility.Collapsed;
         // Compact rows leave one pixel after the final time bar; expanded rows do not.
-        Control<Grid>("Toolbar").Margin = new Thickness(0,compact ? -1 : 0,0,0);
-        Control<Grid>("LayoutRoot").RowDefinitions[1].Height = new GridLength(showIcons ? (compact ? 16 : 17) : 0);
+        var layout = Control<Grid>("LayoutRoot");
+        Grid.SetRow(Control<Grid>("Toolbar"),toolbarTop ? 0 : 1);
+        Grid.SetRow(Control<Grid>("QuotaArea"),toolbarTop ? 1 : 0);
+        layout.RowDefinitions[toolbarTop ? 0 : 1].Height = new GridLength(showIcons ? (toolbarTop ? 20 : compact ? 16 : 17) : 0);
+        layout.RowDefinitions[toolbarTop ? 1 : 0].Height = GridLength.Auto;
+        Control<Border>("Root").Padding = !showIcons || toolbarTop ? new Thickness(8) : new Thickness(8,8,8,0);
+        Control<Grid>("QuotaArea").Margin = new Thickness(0,toolbarTop && !compact ? 4 : 0,0,0);
+        Control<Grid>("Toolbar").Margin = toolbarTop ? new Thickness(0) : new Thickness(0,compact ? -1 : 0,0,0);
+        for (int i=0;i<toolbarOrder.Length;i++) {
+            var button=Control<Button>(toolbarOrder[i]); Grid.SetColumn(button,i+1); button.TabIndex=i;
+            button.VerticalAlignment=toolbarTop ? VerticalAlignment.Top : VerticalAlignment.Center;
+            Control<Grid>("Toolbar").ColumnDefinitions[i+1].Width = toolbarTop ? new GridLength(24) : new GridLength(1,GridUnitType.Star);
+        }
+        Control<Grid>("Toolbar").ColumnDefinitions[0].Width = toolbarTop ? new GridLength(1,GridUnitType.Star) : new GridLength(0);
+        ConfigureHeaderPlacement(compact);
         Control<StackPanel>("Details").Visibility = expanded && !mini ? Visibility.Visible : Visibility.Collapsed;
         Control<Grid>("Compact").Visibility = expanded && !mini ? Visibility.Collapsed : Visibility.Visible;
         foreach (string prefix in new[] { "Hour", "Week" }) {
@@ -177,10 +194,64 @@ class QuotaWidget
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
+    static void ConfigureHeaderPlacement(bool compact) {
+        var title=Control<TextBlock>("TitleLabel"); var header=Control<Grid>("HeaderGrid"); var toolbar=Control<Grid>("Toolbar");
+        var parent=(Panel)title.Parent; var target=toolbarTop ? toolbar : header;
+        if (parent!=target) { parent.Children.Remove(title); target.Children.Add(title); }
+        Grid.SetColumn(title,0); title.Visibility=toolbarTop && compact ? Visibility.Collapsed : Visibility.Visible;
+        title.TextTrimming=TextTrimming.CharacterEllipsis;
+        header.Visibility=toolbarTop ? Visibility.Collapsed : Visibility.Visible;
+        var updated=Control<TextBlock>("TopUpdated");
+        var recordRow=Control<Grid>(snapshot!=null && snapshot.Hour==null && snapshot.Week!=null ? "WeekInfo" : "HourInfo");
+        if (updated.Parent!=recordRow) { ((Panel)updated.Parent).Children.Remove(updated); recordRow.Children.Add(updated); }
+        updated.Visibility=toolbarTop && !compact ? Visibility.Visible : Visibility.Collapsed;
+        updated.Text=snapshot==null ? Text("待更新","Waiting") : Text(queryFailed ? "失败" : "更新",queryFailed ? "Failed" : "Updated")+" "+snapshot.Time.ToLocalTime().ToString("HH:mm:ss");
+        updated.Foreground=Control<TextBlock>("Updated").Foreground;
+        updated.ToolTip=Control<TextBlock>("Updated").Text+"\n"+Control<TextBlock>("Updated").ToolTip;
+        double titleWidth=80;
+        if (toolbarTop) foreach(string name in new[] {"HourLabel","WeekLabel"}) {
+            var label=Control<TextBlock>(name);
+            var measure=new FormattedText(label.Text ?? "",CultureInfo.InvariantCulture,FlowDirection.LeftToRight,
+                new Typeface(label.FontFamily,label.FontStyle,label.FontWeight,label.FontStretch),label.FontSize,Brushes.White,VisualTreeHelper.GetDpi(label).PixelsPerDip);
+            titleWidth=Math.Max(titleWidth,Math.Ceiling(measure.Width)+2);
+        }
+        foreach(string prefix in new[] {"Hour","Week"}) {
+            var row=Control<Grid>(prefix+"Info");
+            row.ColumnDefinitions[0].Width=new GridLength(toolbarTop ? titleWidth : 140);
+            bool timeHere=toolbarTop && row==recordRow;
+            row.ColumnDefinitions[4].Width=timeHere ? new GridLength(prefix=="Hour" ? 46 : 78) : new GridLength(1,GridUnitType.Star);
+            row.ColumnDefinitions[5].Width=timeHere ? new GridLength(1,GridUnitType.Star) : new GridLength(0);
+            Control<TextBlock>(prefix+"Reset").TextTrimming=toolbarTop ? TextTrimming.CharacterEllipsis : TextTrimming.None;
+        }
+    }
     static string ToolbarPreferenceFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "toolbar.txt"); }
     static void LoadToolbarPreference() {
         try { pinIcons = !File.Exists(ToolbarPreferenceFile()) || File.ReadAllText(ToolbarPreferenceFile()).Trim() != "hide"; }
         catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try {
+            string path = ToolbarLayoutFile();
+            if (File.Exists(path)) ApplyToolbarLayout(new JavaScriptSerializer().Deserialize<ToolbarLayout>(File.ReadAllText(path)));
+        } catch (IOException) { } catch (UnauthorizedAccessException) { } catch (ArgumentException) { }
+    }
+    class ToolbarLayout { public bool Top; public string[] Order; }
+    static string ToolbarLayoutFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"toolbar-layout.json"); }
+    static bool ApplyToolbarLayout(ToolbarLayout saved) {
+        if (saved == null || saved.Order == null || saved.Order.Length != 4 || saved.Order.Distinct().Count() != 4
+            || saved.Order.Any(name => !DefaultToolbarOrder.Contains(name))) return false;
+        toolbarTop = saved.Top; toolbarOrder = (string[])saved.Order.Clone(); return true;
+    }
+    static void SaveToolbarLayout() {
+        if (checking) return;
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(ToolbarLayoutFile()));
+            File.WriteAllText(ToolbarLayoutFile(),new JavaScriptSerializer().Serialize(new ToolbarLayout {Top=toolbarTop,Order=toolbarOrder}));
+        } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+    static void SwapToolbarPosition(int slot, string button) {
+        int previous = Array.IndexOf(toolbarOrder,button);
+        if (previous < 0 || slot < 0 || slot >= 4) return;
+        string displaced = toolbarOrder[slot]; toolbarOrder[slot] = button; toolbarOrder[previous] = displaced;
+        Render(); SaveToolbarLayout();
     }
     static void SetPinnedIcons(bool value) {
         pinIcons = value; Render();
@@ -235,7 +306,8 @@ class QuotaWidget
             Background = new SolidColorBrush(Color.FromRgb(27,33,48)), Foreground = Brushes.WhiteSmoke,
             FontFamily = new FontFamily("Microsoft YaHei UI"), FontSize = 12, ShowInTaskbar = false };
         settingsWindow = dialog;
-        var panel = new StackPanel { Margin = new Thickness(18) }; dialog.Content = panel;
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        dialog.Content = new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
         var languageLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(languageLabel);
         var language = new ComboBox { SelectedIndex = english ? 1 : 0, Margin = new Thickness(0,0,0,16) };
         language.Items.Add("中文"); language.Items.Add("English"); panel.Children.Add(language);
@@ -248,20 +320,61 @@ class QuotaWidget
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,14), Foreground = Brushes.LightSlateGray }; panel.Children.Add(note);
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
         var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
+        var placementLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(placementLabel);
+        var placement = new ComboBox { Margin = new Thickness(0,0,0,12) };
+        placement.Items.Add(new ComboBoxItem()); placement.Items.Add(new ComboBoxItem());
+        placement.SelectedIndex = toolbarTop ? 1 : 0; panel.Children.Add(placement);
+        var orderLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(orderLabel);
+        var orderEditors = new ComboBox[4]; var positionLabels = new TextBlock[4];
+        for (int i=0;i<4;i++) {
+            var row = new Grid { Margin = new Thickness(0,0,0,6) };
+            row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(70)}); row.ColumnDefinitions.Add(new ColumnDefinition());
+            positionLabels[i] = new TextBlock {VerticalAlignment=VerticalAlignment.Center}; row.Children.Add(positionLabels[i]);
+            orderEditors[i] = new ComboBox();
+            foreach (string name in DefaultToolbarOrder) orderEditors[i].Items.Add(new ComboBoxItem {Tag=name});
+            orderEditors[i].SelectedIndex = Array.IndexOf(DefaultToolbarOrder,toolbarOrder[i]);
+            Grid.SetColumn(orderEditors[i],1); row.Children.Add(orderEditors[i]); panel.Children.Add(row);
+        }
+        var resetToolbar = new Button {Padding=new Thickness(10,5,10,5),Margin=new Thickness(0,0,0,16)}; panel.Children.Add(resetToolbar);
+        bool syncingOrder = false;
+        Action syncOrder = () => {
+            syncingOrder = true;
+            try { for (int i=0;i<4;i++) orderEditors[i].SelectedIndex = Array.IndexOf(DefaultToolbarOrder,toolbarOrder[i]); placement.SelectedIndex=toolbarTop ? 1 : 0; }
+            finally { syncingOrder = false; }
+        };
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var done = new Button { Padding = new Thickness(10,5,10,5), IsCancel = true };
         actions.Children.Add(done); panel.Children.Add(actions);
         Action labels = () => {
             dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言", "Language");
             scaleLabel.Text = Text("缩放比例", "Scale");
-            note.Text = Text("40%–150% · 支持滚轮缩放。低于 80% 时仅显示条形和按钮。修改自动保存。", "40%–150% · Mouse wheel supported. Below 80%, only bars and buttons are shown. Changes save automatically.");
+            note.Text = Text("40%–150% · 支持滚轮缩放。低于 80% 时隐藏文字。修改自动保存。", "40%–150% · Mouse wheel supported. Text is hidden below 80%. Changes save automatically.");
             colors.Content = Text("配色设置…", "Colors…"); done.Content = Text("完成", "Done");
-            toolbarOption.Content = Text("收起时保留底部按钮", "Keep bottom buttons when collapsed");
+            toolbarOption.Content = Text("收起时保留按钮", "Keep toolbar buttons when collapsed");
+            placementLabel.Text = Text("按钮栏位置", "Toolbar placement");
+            ((ComboBoxItem)placement.Items[0]).Content = Text("下方 · 向上展开", "Bottom · expand upward");
+            ((ComboBoxItem)placement.Items[1]).Content = Text("上方 · 向下展开", "Top · expand downward");
+            orderLabel.Text = Text("按钮顺序（从左到右）", "Button order (left to right)");
+            string[] names = english ? new[] {"Settings","Lock","Refresh","Close"} : new[] {"设置","锁","刷新","关闭"};
+            for (int i=0;i<4;i++) {
+                positionLabels[i].Text = Text("位置 ","Slot ")+(i+1);
+                for (int j=0;j<4;j++) ((ComboBoxItem)orderEditors[i].Items[j]).Content=names[j];
+            }
+            resetToolbar.Content = Text("恢复默认位置与顺序", "Reset placement and order");
         };
         labels();
         language.SelectionChanged += (s,e) => { SelectLanguage(language.SelectedIndex == 1); labels(); };
         toolbarOption.Checked += (s,e) => SetPinnedIcons(true);
         toolbarOption.Unchecked += (s,e) => SetPinnedIcons(false);
+        placement.SelectionChanged += (s,e) => { if (!syncingOrder && placement.SelectedIndex >= 0) { toolbarTop=placement.SelectedIndex==1; Render(); SaveToolbarLayout(); } };
+        for (int i=0;i<4;i++) {
+            int slot=i;
+            orderEditors[i].SelectionChanged += (s,e) => {
+                if (syncingOrder || orderEditors[slot].SelectedIndex < 0) return;
+                SwapToolbarPosition(slot,DefaultToolbarOrder[orderEditors[slot].SelectedIndex]); syncOrder();
+            };
+        }
+        resetToolbar.Click += (s,e) => { toolbarTop=false; toolbarOrder=(string[])DefaultToolbarOrder.Clone(); syncOrder(); Render(); SaveToolbarLayout(); };
         slider.ValueChanged += (s,e) => { SetZoom(slider.Value / 100); input.Text = (zoom * 100).ToString("0",CultureInfo.InvariantCulture); input.ClearValue(System.Windows.Controls.Control.BorderBrushProperty); };
         Action commit = () => {
             double value;
@@ -282,6 +395,12 @@ class QuotaWidget
                 toolbarOption.IsChecked = !previousPin;
                 if (pinIcons == previousPin) throw new Exception("Toolbar setting did not update.");
                 toolbarOption.IsChecked = previousPin;
+                orderEditors[0].SelectedIndex = 3;
+                if (toolbarOrder[0] != "CloseButton" || toolbarOrder[3] != "SettingsButton" || orderEditors[3].SelectedIndex != 0) throw new Exception("Settings order exchange failed.");
+                placement.SelectedIndex = 1;
+                if (!toolbarTop || Grid.GetRow(Control<Grid>("Toolbar")) != 0) throw new Exception("Settings placement failed.");
+                resetToolbar.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (toolbarTop || !toolbarOrder.SequenceEqual(DefaultToolbarOrder)) throw new Exception("Toolbar defaults failed.");
                 slider.Value = 40;
                 if (zoom != 0.4 || Control<StackPanel>("Details").Visibility != Visibility.Collapsed || Control<ProgressBar>("CompactHourBar").Uid != "") throw new Exception("Settings slider / mini layout failed.");
                 input.Text = "125"; commit();
@@ -309,6 +428,82 @@ class QuotaWidget
         } finally { settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
     }
     static string settingsPreviewPath;
+    static void CheckToolbarLayout(string report) {
+        window.Opacity=0; window.ShowActivated=false; window.ShowInTaskbar=false; window.Left=-10000; window.Top=-10000;
+        long now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        snapshot=new Snapshot {Time=DateTimeOffset.UtcNow,Live=true,Hour=new Limit {Remaining=65,Reset=now+18000},Week=new Limit {Remaining=72,Reset=now+604800}};
+        window.Show(); window.UpdateLayout();
+        SwapToolbarPosition(0,"CloseButton");
+        if (toolbarOrder[0] != "CloseButton" || toolbarOrder[3] != "SettingsButton") throw new Exception("Duplicate choice did not swap.");
+        var serializer=new JavaScriptSerializer();
+        var saved=new ToolbarLayout {Top=true,Order=toolbarOrder};
+        if (!ApplyToolbarLayout(serializer.Deserialize<ToolbarLayout>(serializer.Serialize(saved)))) throw new Exception("Toolbar preference roundtrip failed.");
+        if (ApplyToolbarLayout(new ToolbarLayout {Top=false,Order=new[] {"CloseButton","CloseButton","LockButton","RefreshButton"}}) || !toolbarTop) throw new Exception("Invalid order changed layout.");
+        toolbarOrder=(string[])DefaultToolbarOrder.Clone();
+        var folder=Path.GetDirectoryName(report);
+        var referenceOffsets=new Dictionary<string,double>();
+        foreach (bool en in new[] {false,true}) {
+            SelectLanguage(en);
+            foreach (bool above in new[] {false,true}) {
+                toolbarTop=above;
+                foreach (bool pinned in new[] {false,true}) {
+                    SetPinnedIcons(pinned);
+                    foreach (double scale in new[] {0.4,1.0,1.5}) {
+                        SetZoom(scale); SetExpanded(false); window.UpdateLayout();
+                        if (!pinned) {
+                            var padding=Control<Border>("Root").Padding;
+                            if (padding.Top!=8 || padding.Bottom!=8) throw new Exception("Hidden toolbar padding is asymmetric.");
+                            var first=Control<ProgressBar>("CompactHourBar"); var last=Control<ProgressBar>("CompactWeekTimeBar");
+                            double firstY=first.TranslatePoint(new Point(0,0),window).Y;
+                            double lastY=last.TranslatePoint(new Point(0,last.ActualHeight),window).Y;
+                            if (Math.Abs(firstY-(window.ActualHeight-lastY))>1.5) throw new Exception("Scaled hidden-toolbar visual whitespace is asymmetric.");
+                        }
+                        double fixedEdge=above ? window.Top : window.Top+window.Height;
+                        SetExpanded(true); window.UpdateLayout();
+                        if (Math.Abs((above ? window.Top : window.Top+window.Height)-fixedEdge)>0.1) throw new Exception("Expansion moved fixed edge.");
+                        if (scale>=0.8) {
+                            double infoOffset=Control<Grid>("HourInfo").TranslatePoint(new Point(0,0),window).Y;
+                            string key=en+"/"+pinned+"/"+scale.ToString(CultureInfo.InvariantCulture);
+                            if (!above) referenceOffsets[key]=infoOffset;
+                            else if (Math.Abs(infoOffset-referenceOffsets[key])>1.5) throw new Exception("Top and bottom expanded header spacing differs.");
+                        }
+                        var toolbar=Control<Grid>("Toolbar"); var quota=Control<Grid>("QuotaArea");
+                        double toolbarY=toolbar.TranslatePoint(new Point(0,0),window).Y;
+                        double quotaY=quota.TranslatePoint(new Point(0,0),window).Y;
+                        if ((toolbarY<quotaY)!=above) throw new Exception("Toolbar row placement incorrect.");
+                        if (above && scale>=0.8) {
+                            if (Control<TextBlock>("TitleLabel").Parent!=toolbar || Control<TextBlock>("TopUpdated").Parent!=Control<Grid>("HourInfo")) throw new Exception("Top title / update row incorrect.");
+                            if (Control<TextBlock>("TopUpdated").Visibility!=Visibility.Visible || string.IsNullOrEmpty(Control<TextBlock>("TopUpdated").Text)) throw new Exception("Update time missing in top layout.");
+                            for (int i=1;i<5;i++) if (toolbar.ColumnDefinitions[i].Width.Value!=24 || toolbar.ColumnDefinitions[i].Width.GridUnitType!=GridUnitType.Pixel) throw new Exception("Top buttons not compact.");
+                        }
+                        for (int i=0;i<4;i++) if (Grid.GetColumn(Control<Button>(toolbarOrder[i]))!=i+1) throw new Exception("Order not applied to columns.");
+                        double iconY=Control<Button>("SettingsButton").TranslatePoint(new Point(0,0),window).Y+window.Top;
+                        SetExpanded(false); window.UpdateLayout();
+                        if (above && pinned && Math.Abs(Control<Button>("SettingsButton").TranslatePoint(new Point(0,0),window).Y+window.Top-iconY)>0.1) throw new Exception("Top buttons moved on collapse.");
+                        if ((toolbar.Visibility==Visibility.Visible)!=pinned || Math.Abs((above ? window.Top : window.Top+window.Height)-fixedEdge)>0.1) throw new Exception("Collapse preference or edge changed.");
+                        SetExpanded(true); window.UpdateLayout();
+                        if (Math.Abs(Control<Button>("SettingsButton").TranslatePoint(new Point(0,0),window).Y+window.Top-iconY)>0.1) throw new Exception("Toolbar shifted between expansions.");
+                        if (scale==1 && pinned) {
+                            SavePreview(Path.Combine(folder,(en ? "en" : "zh")+(above ? "-top" : "-bottom")+"-expanded.png"));
+                            SetExpanded(false); SavePreview(Path.Combine(folder,(en ? "en" : "zh")+(above ? "-top" : "-bottom")+"-compact.png"));
+                        }
+                    }
+                }
+            }
+        }
+        toolbarTop=true; SetZoom(1); SetExpanded(true); snapshot.Hour=null; Render(); window.UpdateLayout();
+        if (Control<TextBlock>("TopUpdated").Parent!=Control<Grid>("WeekInfo") || Control<TextBlock>("TopUpdated").Visibility!=Visibility.Visible)
+            throw new Exception("Weekly-only update time not moved to the visible row.");
+        SavePreview(Path.Combine(folder,"weekly-only-top.png"));
+        window.Top=450;
+        var tallDialog=new Window {Width=360,Height=700,Opacity=0,ShowActivated=false,ShowInTaskbar=false,Content=new ScrollViewer {Content=new TextBlock {Text="Scrollable settings",Height=900}}};
+        try {
+            PositionSettings(tallDialog,700); tallDialog.Show(); tallDialog.UpdateLayout(); PositionSettings(tallDialog); tallDialog.UpdateLayout();
+            if (tallDialog.ActualHeight>tallDialog.MaxHeight+1 || (tallDialog.Top<window.Top+window.Height && tallDialog.Top+tallDialog.ActualHeight>window.Top))
+                throw new Exception("Tall settings overlaps the widget or ignores available space.");
+        } finally { tallDialog.Close(); }
+        File.WriteAllText(report,"PASS: dropdown swap semantics, order validity and JSON roundtrip; top/bottom rows and fixed expansion edges; repeated expand/collapse with pinned/unpinned buttons in both languages at 40/100/150 percent; tall settings fit available space without widget overlap. No queries or preference writes. Physical pointer movement and saved-file restart not exercised.\r\n");
+    }
     static void WaitForHoverCheck() {
         var frame = new DispatcherFrame();
         var finish = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
@@ -380,8 +575,12 @@ class QuotaWidget
         var bottomRight = transform.Transform(new Point(area.Right,area.Bottom));
         double height = dialog.ActualHeight > 0 ? dialog.ActualHeight : estimatedHeight;
         dialog.Left = Math.Max(topLeft.X,Math.Min(bottomRight.X-dialog.Width,window.Left+(window.Width-dialog.Width)/2));
-        double above = window.Top-height-gap;
-        dialog.Top = above >= topLeft.Y ? above : window.Top+window.Height+gap;
+        double above = Math.Max(0,window.Top-gap-topLeft.Y);
+        double below = Math.Max(0,bottomRight.Y-window.Top-window.Height-gap);
+        bool putAbove = height <= above || (height > below && above >= below);
+        dialog.MaxHeight = Math.Max(80,putAbove ? above : below);
+        height = Math.Min(height,dialog.MaxHeight);
+        dialog.Top = putAbove ? window.Top-height-gap : window.Top+window.Height+gap;
     }
     static void CheckRealizedLayout(string report) {
         // Realize the native window without displaying it or querying an account.
@@ -1144,7 +1343,7 @@ class QuotaWidget
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -1156,6 +1355,9 @@ class QuotaWidget
             if (!checking) { LoadLanguage(); LoadZoom(); LoadTheme(); LoadToolbarPreference(); }
             ConfigureInteraction();
             ApplyTheme();
+            if (args.Length == 2 && args[0] == "--toolbar-check") {
+                CheckToolbarLayout(args[1]); window.Close(); return 0;
+            }
             if (args.Length == 2 && args[0] == "--hover-check") {
                 CheckHoverBoundary(args[1]); window.Close(); return 0;
             }
