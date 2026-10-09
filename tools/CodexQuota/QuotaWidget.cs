@@ -160,9 +160,9 @@ class QuotaWidget
         }
     }
     static double zoom = 1;
-    static double textThreshold = 0.8, baseWidth = 360;
+    static double textThreshold = 0.6, baseWidth = 180;
     static DateTimeOffset lastActiveCompleted = DateTimeOffset.MinValue;
-    class DisplayOptions { public double TextThreshold = 0.8, Width = 360; }
+    class DisplayOptions { public double TextThreshold = 0.6, Width = 180; }
     static string DisplayOptionsFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"display.json"); }
     static void ApplyDisplayOptions(DisplayOptions options) {
         if (options == null) return;
@@ -1920,7 +1920,7 @@ class QuotaWidget
         snapshot=new Snapshot {Time=now}; if(ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Unavailable live windows queried endlessly.");
         var serializer=new JavaScriptSerializer();
         ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>("{}"));
-        if(textThreshold!=0.8 || baseWidth!=360) throw new Exception("Old display settings compatibility failed.");
+        if(textThreshold!=0.6 || baseWidth!=180) throw new Exception("Old display settings compatibility failed.");
         ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>(serializer.Serialize(new DisplayOptions {TextThreshold=0.6,Width=480})));
         if(textThreshold!=0.6 || baseWidth!=480) throw new Exception("Display preference roundtrip failed.");
         ApplyDisplayOptions(new DisplayOptions {TextThreshold=2,Width=1});

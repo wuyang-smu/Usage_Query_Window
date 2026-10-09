@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Codex 额度" Width="360" Height="224" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="True" FontFamily="Microsoft YaHei UI" FontSize="12" UseLayoutRounding="True">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Codex 额度" Width="180" Height="224" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="True" FontFamily="Microsoft YaHei UI" FontSize="12" UseLayoutRounding="True">
  <Window.Resources>
   <SolidColorBrush x:Key="ToolbarNormal" Color="#AAB3C2" />
   <SolidColorBrush x:Key="ToolbarHover" Color="#D5DAE1" />
