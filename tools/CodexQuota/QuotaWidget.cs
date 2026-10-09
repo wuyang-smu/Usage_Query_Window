@@ -130,7 +130,7 @@ class QuotaWidget
     static DispatcherTimer zoomPaintTimer;
     static DateTime zoomPaintUntil;
     static bool settingsOpen;
-    static bool pinIcons = true;
+    static bool pinIcons = true, noExpand;
     static bool toolbarTop;
     static readonly string[] DefaultToolbarOrder = { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" };
     static string[] toolbarOrder = (string[])DefaultToolbarOrder.Clone();
@@ -240,7 +240,7 @@ class QuotaWidget
     static void ApplyScaleLayout() {
         bool mini = zoom < textThreshold;
         bool narrowExpanded = false;
-        bool compact = !expanded || mini;
+        bool compact = noExpand || !expanded || mini;
         foreach (string name in new[] { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" }) {
             var icon = (Viewbox)Control<Button>(name).Content;
             icon.Width = icon.Height = 13 / Math.Max(1,zoom);
@@ -356,18 +356,18 @@ class QuotaWidget
             if (File.Exists(path)) ApplyToolbarLayout(new JavaScriptSerializer().Deserialize<ToolbarLayout>(File.ReadAllText(path)));
         } catch (IOException) { } catch (UnauthorizedAccessException) { } catch (ArgumentException) { }
     }
-    class ToolbarLayout { public bool Top; public string[] Order; }
+    class ToolbarLayout { public bool Top, NoExpand; public string[] Order; }
     static string ToolbarLayoutFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"toolbar-layout.json"); }
     static bool ApplyToolbarLayout(ToolbarLayout saved) {
         if (saved == null || saved.Order == null || saved.Order.Length != 4 || saved.Order.Distinct().Count() != 4
             || saved.Order.Any(name => !DefaultToolbarOrder.Contains(name))) return false;
-        toolbarTop = saved.Top; toolbarOrder = (string[])saved.Order.Clone(); return true;
+        noExpand = saved.NoExpand; toolbarTop = saved.Top; toolbarOrder = (string[])saved.Order.Clone(); return true;
     }
     static void SaveToolbarLayout() {
         if (checking) return;
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(ToolbarLayoutFile()));
-            File.WriteAllText(ToolbarLayoutFile(),new JavaScriptSerializer().Serialize(new ToolbarLayout {Top=toolbarTop,Order=toolbarOrder}));
+            File.WriteAllText(ToolbarLayoutFile(),new JavaScriptSerializer().Serialize(new ToolbarLayout {Top=toolbarTop,Order=toolbarOrder,NoExpand=noExpand}));
         } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
     static void SwapToolbarPosition(int slot, string button) {
@@ -594,6 +594,7 @@ class QuotaWidget
         };
         reloadCards();
         var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
+        var noExpandOption = new CheckBox { IsChecked=noExpand, Foreground=Brushes.WhiteSmoke, Margin=new Thickness(0,0,0,12) }; panel.Children.Add(noExpandOption);
         var placementLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(placementLabel);
         var placement = new ComboBox { Margin = new Thickness(0,0,0,12) };
         placement.Items.Add(new ComboBoxItem()); placement.Items.Add(new ComboBoxItem());
@@ -641,7 +642,8 @@ class QuotaWidget
         group(languageHeading,new UIElement[]{languageLabel,language});
         group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag});
         groupTarget=toolbarPanel;group(toolbarHeading,toolbarElements);
-        groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,colors});panel.Children.Add(actions);
+        var arrowNote=new TextBlock {Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke};
+        groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,arrowNote,colors});panel.Children.Add(actions);
         // Let the current page shrink within the screen instead of creating one
         // long settings document. Each page owns its own overflow scrolling.
         var settingsRoot=new DockPanel {Margin=new Thickness(18)};
@@ -649,12 +651,14 @@ class QuotaWidget
         DockPanel.SetDock(settingsHeading,Dock.Top);DockPanel.SetDock(actions,Dock.Bottom);
         settingsRoot.Children.Add(settingsHeading);settingsRoot.Children.Add(actions);settingsRoot.Children.Add(pages);dialog.Content=settingsRoot;
         foreach(var item in new TextBlock[]{languageLabel,note,placementLabel}) if(guide) item.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
+        if(guide) noExpandOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) toolbarOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) {
             foreach(var page in new[]{generalPage,toolbarPage,colorPage}) page.Tag="guide";
             colors.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));colors.BorderBrush=colors.Foreground;
         }
         Action labels = () => {
+            arrowNote.Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day");
             dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言（Language）", "Language");
             settingsHeading.Text=dialog.Title;languageHeading.Text=Text("语言（Language）","Language");sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("配色","Colors");toolbarHeading.Text=Text("工具栏","Toolbar");
             scaleLabel.Text = Text("缩放比例", "Scale");
@@ -664,6 +668,7 @@ class QuotaWidget
             colors.Content = Text("自定义配色…", "Custom colors…"); done.Content = Text("完成", "Done");
             generalPage.Header=Text("常规","General");toolbarPage.Header=Text("工具栏","Toolbar");colorPage.Header=Text("配色","Colors");
             colorNote.Text=Text("点击色卡立即应用并保存。上下拖动、滚轮或滚动条查看其余色卡。自定义颜色可另存为新色卡。","Click a card to apply and save. Drag vertically, scroll or use the scrollbar to see more. Save custom colors as a new card.");syncColors();
+            noExpandOption.Content=Text("不展开模式","No expansion mode"); noExpandOption.ToolTip=Text("鼠标进入时只显示工具栏，额度条保持收起布局。","Hover shows only the toolbar; usage bars retain their compact layout.");
             toolbarOption.Content = Text("收起时保留工具栏", "Keep toolbar when collapsed");
             toolbarOption.ToolTip=Text("关闭后，只有展开窗口时才显示工具栏。","When disabled, the toolbar appears only while expanded.");
             placementLabel.ToolTip=Text("上方工具栏向下展开，下方工具栏向上展开。","Top toolbar expands downward; bottom toolbar expands upward.");
@@ -680,6 +685,8 @@ class QuotaWidget
         };
         labels();
         language.SelectionChanged += (s,e) => { SelectLanguage(language.SelectedIndex == 1); labels(); };
+        noExpandOption.Checked += (s,e) => {noExpand=true; Render(); SaveToolbarLayout();};
+        noExpandOption.Unchecked += (s,e) => {noExpand=false; Render(); SaveToolbarLayout();};
         toolbarOption.Checked += (s,e) => SetPinnedIcons(true);
         toolbarOption.Unchecked += (s,e) => SetPinnedIcons(false);
         placement.SelectionChanged += (s,e) => { if (!syncingOrder && placement.SelectedIndex >= 0) { toolbarTop=placement.SelectedIndex==1; Render(); SaveToolbarLayout(); } };
@@ -702,7 +709,7 @@ class QuotaWidget
         };
         input.LostKeyboardFocus += (s,e) => commit();
         input.KeyDown += (s,e) => { if (e.Key == System.Windows.Input.Key.Enter) { commit(); e.Handled = true; } };
-        colors.Click += (s,e) => {OpenAppearance();reloadCards();};
+        colors.Click += (s,e) => {OpenAppearance(null,guide);reloadCards();};
         done.Click += (s,e) => { commit(); commitThreshold(); commitWidth(); dialog.Close(); };
         try {
             if (checking) {
@@ -1073,7 +1080,7 @@ class QuotaWidget
         };
         dialog.ContentRendered+=(s,e)=>input.Focus();dialog.ShowDialog();return result;
     }
-    static bool OpenAppearance(Dictionary<string,string> presetBackup=null) {
+    static bool OpenAppearance(Dictionary<string,string> presetBackup=null, bool guide=false) {
         if (appearanceOpen) return false;
         appearanceOpen = true; collapseTimer.Stop(); SetExpanded(true);
         var original = new Dictionary<string,string>(Theme.Colors);
