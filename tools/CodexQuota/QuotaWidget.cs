@@ -26,6 +26,7 @@ public class SegmentedVisual : FrameworkElement
     public string Label {get{return (string)GetValue(LabelProperty);}set{SetValue(LabelProperty,value);}}
     public static readonly DependencyProperty DayMarkerProperty = DependencyProperty.Register("DayMarker", typeof(double), typeof(SegmentedVisual), new FrameworkPropertyMetadata(-1.0, FrameworkPropertyMetadataOptions.AffectsRender));
     public double DayMarker {get {return (double)GetValue(DayMarkerProperty);} set {SetValue(DayMarkerProperty,value);} }
+    public static readonly DependencyProperty MarkerWidthProperty=DependencyProperty.RegisterAttached("MarkerWidth",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(2.0,FrameworkPropertyMetadataOptions.AffectsRender));
     public string Caption { get { return (string)GetValue(CaptionProperty); } set { SetValue(CaptionProperty, value); } }
     public double Value { get { return (double)GetValue(ValueProperty); } set { SetValue(ValueProperty, value); } }
     public Brush Fill { get { return (Brush)GetValue(FillProperty); } set { SetValue(FillProperty, value); } }
@@ -44,7 +45,7 @@ public class SegmentedVisual : FrameworkElement
         double width = ActualWidth, height = ActualHeight;
         if (width <= 0 || height <= 0) return;
         var empty = Theme.Brush("track");
-        double[] boundaries = Kind.Contains("week") ? new double[] {0,100.0/7,200.0/7,300.0/7,400.0/7,500.0/7,600.0/7,100} : new double[] {0,20,40,60,80,100};
+        double[] boundaries = time && Kind.Contains("week") ? new double[] {0,100.0/7,200.0/7,300.0/7,400.0/7,500.0/7,600.0/7,100} : new double[] {0,20,40,60,80,100};
         double end = width * Math.Max(0, Math.Min(100, Value)) / 100;
         double slope = width * 0.30;
         var shape = Outline(width,height,slope,0);
@@ -59,6 +60,13 @@ public class SegmentedVisual : FrameworkElement
         for (int i = 1; i < boundaries.Length - 1; i++) {
             double x = width * boundaries[i] / 100;
             context.DrawLine(bigMark,new Point(x,fullTicks ? 0 : detail ? height*0.5 : height*0.75),new Point(x,height));
+        }
+        if(!time) {
+            var smallMark=new Pen(Theme.Brush("ticks"),detail && !Kind.Contains("week") ? 1.5 : 2);
+            for(int percent=10;percent<100;percent+=20) {
+                double x=width*percent/100;
+                context.DrawLine(smallMark,new Point(x,detail ? height*0.75 : height*0.875),new Point(x,height));
+            }
         }
         context.Pop();
         var borderBrush = Theme.Brush("barBorder");
@@ -78,14 +86,15 @@ public class SegmentedVisual : FrameworkElement
     void DrawPairMarker(DrawingContext context,double width,double height) {
         if(DayMarker<0 || DayMarker>1 || width<=0 || height<=0) return;
         double half=Math.Min(3,width/4), x=Math.Max(half+0.8,Math.Min(width-half-0.8,width*DayMarker));
-        var color=new SolidColorBrush(Color.FromRgb(112,184,255));
+        var color=Theme.Brush("weekMarker");
         context.PushClip(new RectangleGeometry(new Rect(0,0,width,height)));
-        double bottom=height-7;
-        context.DrawLine(new Pen(new SolidColorBrush(Color.FromArgb(35,112,184,255)),3),new Point(x,bottom-0.7),new Point(x,height-0.7));
-        context.DrawLine(new Pen(color,1),new Point(x,bottom-0.7),new Point(x,height-0.7));
+        // The quota ends seven pixels above the pair bottom (2px gap + 5px timer).
+        // Keep the entire reference marker below that edge so it never covers quota text.
+        double tip=height-7,triangleBottom=tip+3.3;
+        context.DrawLine(new Pen(color,(double)GetValue(MarkerWidthProperty)),new Point(x,triangleBottom),new Point(x,height-0.7));
         {
             var geometry=new StreamGeometry();
-            using(var path=geometry.Open()) {path.BeginFigure(new Point(x,bottom-4.7),true,true);path.LineTo(new Point(x+half,bottom-0.7),true,false);path.LineTo(new Point(x-half,bottom-0.7),true,false);}
+            using(var path=geometry.Open()) {path.BeginFigure(new Point(x,tip),true,true);path.LineTo(new Point(x+half,triangleBottom),true,false);path.LineTo(new Point(x-half,triangleBottom),true,false);}
             context.DrawGeometry(color,null,geometry);
         }
         context.Pop();
@@ -120,7 +129,7 @@ class QuotaWidget
     static readonly string[] DefaultToolbarOrder = { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" };
     static string[] toolbarOrder = (string[])DefaultToolbarOrder.Clone();
     static Window settingsWindow;
-    static System.Windows.Controls.Primitives.Popup welcomePopup;
+    static int settingsVisits;
     static void ConfigureSegments() {
         foreach (string name in new[] { "HourBar", "WeekBar", "CompactHourBar", "CompactWeekBar", "HourTimeBar", "WeekTimeBar", "CompactHourTimeBar", "CompactWeekTimeBar", "WeekGap", "CompactWeekGap", "WeekMarker", "CompactWeekMarker" }) {
             var bar = Control<ProgressBar>(name);
@@ -138,6 +147,7 @@ class QuotaWidget
             visual.SetBinding(SegmentedVisual.CaptionProperty, new Binding("Uid") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.LabelProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.LabelProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.DayMarkerProperty, new Binding("DataContext") { RelativeSource = RelativeSource.TemplatedParent });
+            visual.SetBinding(SegmentedVisual.MarkerWidthProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerWidthProperty),RelativeSource=RelativeSource.TemplatedParent});
             bar.DataContext=-1.0;
             bar.Template = new ControlTemplate(typeof(ProgressBar)) { VisualTree = visual };
         }
@@ -234,11 +244,11 @@ class QuotaWidget
         var layout = Control<Grid>("LayoutRoot");
         Grid.SetRow(Control<Grid>("Toolbar"),toolbarTop ? 0 : 1);
         Grid.SetRow(Control<Grid>("QuotaArea"),toolbarTop ? 1 : 0);
-        layout.RowDefinitions[toolbarTop ? 0 : 1].Height = new GridLength(showIcons ? (toolbarTop ? 20 : compact ? 16 : 17) : 0);
+        layout.RowDefinitions[toolbarTop ? 0 : 1].Height = new GridLength(showIcons ? (compact ? 16 : 20) : 0);
         layout.RowDefinitions[toolbarTop ? 1 : 0].Height = GridLength.Auto;
-        Control<Border>("Root").Padding = !showIcons || toolbarTop ? new Thickness(8) : new Thickness(8,8,8,0);
-        Control<Grid>("QuotaArea").Margin = new Thickness(0,toolbarTop && !compact ? 4 : 0,0,0);
-        Control<Grid>("Toolbar").Margin = toolbarTop ? new Thickness(0) : new Thickness(0,compact ? -1 : 0,0,0);
+        Control<Border>("Root").Padding = new Thickness(8,2/zoom,8,2/zoom);
+        Control<Grid>("QuotaArea").Margin = new Thickness(0,toolbarTop && !compact ? 2/zoom : 0,0,0);
+        Control<Grid>("Toolbar").Margin = new Thickness(0);
         for (int i=0;i<toolbarOrder.Length;i++) {
             var button=Control<Button>(toolbarOrder[i]); Grid.SetColumn(button,i+1); button.TabIndex=i;
             button.Width=Math.Min(24,(baseWidth-18)/4);
@@ -268,18 +278,20 @@ class QuotaWidget
             }
             bar.Tag = (bar.Uid.Length==0 ? "quota-detail" : "quota")+(prefix=="Week" ? "-week" : "")+(narrow ? "-narrow-right" : "")+"-center";
         }
+        Control<ProgressBar>("WeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,2.0);
+        Control<ProgressBar>("CompactWeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,Control<ProgressBar>("CompactWeekBar").Uid.Length==0 ? 2.0 : 3.5);
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
     static void ConfigureHeaderPlacement(bool compact, bool unused = false) {
         var title=Control<TextBlock>("TitleLabel"); var header=Control<Grid>("HeaderGrid"); var toolbar=Control<Grid>("Toolbar");
         if(header.Parent!=Control<StackPanel>("Details")) {((Panel)header.Parent).Children.Remove(header);Control<StackPanel>("Details").Children.Insert(0,header);}
-        var target=toolbarTop ? (Panel)toolbar : header;
+        var target=(Panel)toolbar;
         if(title.Parent!=target) {((Panel)title.Parent).Children.Remove(title);target.Children.Add(title);}
-        title.Visibility=compact && toolbarTop ? Visibility.Collapsed : Visibility.Visible;
+        title.Visibility=compact ? Visibility.Collapsed : Visibility.Visible;
         title.TextTrimming=TextTrimming.CharacterEllipsis;title.ToolTip=title.Text;
         title.VerticalAlignment=VerticalAlignment.Bottom;Grid.SetColumn(title,0);Grid.SetColumnSpan(title,1);
-        header.Visibility=toolbarTop ? Visibility.Collapsed : Visibility.Visible;
+        header.Visibility=Visibility.Collapsed;
         Control<TextBlock>("Updated").Visibility=Visibility.Collapsed;
         Control<TextBlock>("TopUpdated").Visibility=Visibility.Collapsed;
         Control<Grid>("Compact").Margin=new Thickness(0);
@@ -287,14 +299,15 @@ class QuotaWidget
         title.FontSize=13;title.FontWeight=FontWeights.Bold;
         double iconSize=13/Math.Max(1,zoom);
         double buttonSlot=iconSize+6/zoom;
-        if(toolbarTop && !compact && TextWidth(title.Text,13,FontWeights.Bold)+buttonSlot*4+4>available) title.FontSize=10;
-        double room=available-(toolbarTop && !compact ? TextWidth(title.Text,title.FontSize,FontWeights.Bold)+4 : 0);
+        if(!compact && TextWidth(title.Text,13,FontWeights.Bold)+buttonSlot*4+4>available) title.FontSize=10;
+        if(!compact && TextWidth(title.Text,10,FontWeights.Bold)+buttonSlot*4+4>available) title.Visibility=Visibility.Collapsed;
+        double room=available-(title.Visibility==Visibility.Visible ? TextWidth(title.Text,title.FontSize,FontWeights.Bold)+4 : 0);
         buttonSlot=Math.Min(buttonSlot,room/4);
         toolbar.ColumnDefinitions[0].Width=new GridLength(1,GridUnitType.Star);
-        title.Margin=new Thickness(0,0,toolbarTop ? 4 : 0,0);
+        title.Margin=new Thickness(0,0,4,0);
         foreach(string name in toolbarOrder) {
             var button=Control<Button>(name);button.Width=buttonSlot;
-            button.VerticalAlignment=toolbarTop ? VerticalAlignment.Bottom : VerticalAlignment.Center;
+            button.VerticalAlignment=VerticalAlignment.Bottom;
             var icon=(Viewbox)button.Content;icon.Width=icon.Height=Math.Min(13/Math.Max(1,zoom),Math.Max(8,buttonSlot-2));
             toolbar.ColumnDefinitions[Grid.GetColumn(button)].Width=new GridLength(buttonSlot);
         }
@@ -362,41 +375,31 @@ class QuotaWidget
         } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
     static void SelectLanguage(bool value) { english = value; ApplyLanguage(); SaveLanguage(); }
-    static string WelcomeFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "settings-tip-v1.txt"); }
-    static void DismissWelcome(bool remember) {
-        if (welcomePopup != null) welcomePopup.IsOpen = false;
-        if (!remember || checking) return;
-        try {
-            Directory.CreateDirectory(Path.GetDirectoryName(WelcomeFile()));
-            File.WriteAllText(WelcomeFile(), "acknowledged");
-        } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    static string GuideFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "settings-guide-v2.txt"); }
+    static void LoadSettingsGuide() {
+        try {int value;if(File.Exists(GuideFile()) && int.TryParse(File.ReadAllText(GuideFile()),out value)) settingsVisits=Math.Max(0,Math.Min(2,value));}
+        catch(IOException) {} catch(UnauthorizedAccessException) {}
     }
-    static void ShowWelcome() {
-        if (!checking && File.Exists(WelcomeFile())) return;
-        var body = new StackPanel();
-        body.Children.Add(new TextBlock {
-            Text = Text("在这里调整语言、颜色和大小，也可以用滚轮缩放。", "Adjust language, colors and size here. You can also resize with the mouse wheel."),
-            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.WhiteSmoke, MaxWidth = 240, FontSize = 12
-        });
-        var dismiss = new Button { Content = Text("知道了", "Got it"), Margin = new Thickness(0,10,0,0), Padding = new Thickness(10,4,10,4), HorizontalAlignment = HorizontalAlignment.Right };
-        dismiss.Click += (s,e) => DismissWelcome(true); body.Children.Add(dismiss);
-        var bubble = new Grid();
-        bubble.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        bubble.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
-        bubble.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(30,39,58)), BorderBrush = Brushes.SlateGray, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(14), Child = body });
-        var pointer = new System.Windows.Shapes.Path {
-            Data = Geometry.Parse("M 0,0 L 8,8 L 16,0"), Fill = new SolidColorBrush(Color.FromRgb(30,39,58)),
-            Stroke = Brushes.SlateGray, StrokeThickness = 1, Width = 16, Height = 8, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(10,-1,0,0)
-        };
-        Grid.SetRow(pointer,1); bubble.Children.Add(pointer);
-        welcomePopup = new System.Windows.Controls.Primitives.Popup {
-            PlacementTarget = Control<Button>("SettingsButton"), Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
-            AllowsTransparency = true, StaysOpen = true, Child = bubble
-        };
-        if (checking) {
-            if (bubble.Children.Count != 2 || body.Children.Count != 2) throw new Exception("Welcome bubble construction failed.");
-            dismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        } else welcomePopup.IsOpen = true;
+    static bool BeginSettingsVisit() {
+        bool highlight=settingsVisits<2;
+        settingsVisits=Math.Min(2,settingsVisits+1);
+        UpdateSettingsHint();
+        if(checking) return highlight;
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(GuideFile()));
+            File.WriteAllText(GuideFile(),settingsVisits.ToString(CultureInfo.InvariantCulture));
+        } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        return highlight;
+    }
+    static void UpdateSettingsHint() {
+        var button=Control<Button>("SettingsButton");
+        if(settingsVisits==0) {
+            var red=(Color)ColorConverter.ConvertFromString("#E5484D");
+            button.Resources["ToolbarNormal"]=new SolidColorBrush(red);
+            button.Resources["ToolbarHover"]=LightenIcon(red,0.25);
+            button.Resources["ToolbarPressed"]=LightenIcon(red,0.45);
+        } else foreach(string key in new[]{"ToolbarNormal","ToolbarHover","ToolbarPressed"}) button.Resources.Remove(key);
+        button.ToolTip=settingsVisits==0 ? Text("打开设置了解常用功能","Open settings to discover useful controls") : Text("系统设置 · 语言、配色、缩放（也可滚轮缩放）", "Settings · language, colors, scale (or use the mouse wheel)");
     }
     static Action AddNumberSetting(StackPanel panel, TextBlock label, double minimum, double maximum, double initial, string suffix, Action<double> apply) {
         label.Margin=new Thickness(0,0,0,6); panel.Children.Add(label);
@@ -430,9 +433,52 @@ class QuotaWidget
 </Track></Grid></ControlTemplate></Setter.Value></Setter></Style>
 </ResourceDictionary>");
     }
+    static Brush PaletteBrush(Dictionary<string,string> palette,string key) {return new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette[key]));}
+    static Grid CreatePresetCards(Action<int> select,out Button[] buttons) {
+        var grid=new Grid {Margin=new Thickness(0,0,0,8)};
+        var template=(ControlTemplate)XamlReader.Parse("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'><Border x:Name='Card' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='1.5' CornerRadius='6'><ContentPresenter HorizontalAlignment='Stretch' VerticalAlignment='Stretch'/></Border><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Card' Property='BorderBrush' Value='#AECFFF'/></Trigger></ControlTemplate.Triggers></ControlTemplate>");
+        for(int i=0;i<2;i++) {grid.ColumnDefinitions.Add(new ColumnDefinition());grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});}
+        buttons=new Button[4];
+        for(int i=0;i<4;i++) {
+            int index=i;var palette=Theme.Preset(i);
+            var content=new StackPanel();
+            content.Children.Add(new TextBlock {Text=Theme.PresetName(i,english),Tag="PresetName",Foreground=PaletteBrush(palette,"title"),FontSize=12,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,8),TextWrapping=TextWrapping.NoWrap});
+            var bar=new Grid {Height=20,Background=PaletteBrush(palette,"track"),ClipToBounds=true};
+            bar.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(7,GridUnitType.Star)});bar.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(3,GridUnitType.Star)});
+            bar.Children.Add(new Border {Background=PaletteBrush(palette,"quotaGreen")});
+            var caption=new TextBlock {Text="72% · 6d",Foreground=PaletteBrush(palette,"caption"),FontSize=11,FontWeight=FontWeights.Bold,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+            Grid.SetColumnSpan(caption,2);bar.Children.Add(caption);
+            var arrow=new System.Windows.Shapes.Path {Data=Geometry.Parse("M 0,5 L 3.5,0 L 7,5 Z"),Fill=PaletteBrush(palette,"weekMarker"),Width=7,Height=5,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,14,0)};
+            Grid.SetColumnSpan(arrow,2);bar.Children.Add(arrow);
+            content.Children.Add(new Border {Child=bar,BorderBrush=PaletteBrush(palette,"barBorder"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(3)});
+            var swatches=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,7,0,0)};
+            foreach(string key in new[]{"quotaYellow","quotaOrange","quotaRed","weekMarker"}) swatches.Children.Add(new Border {Width=22,Height=4,Background=PaletteBrush(palette,key),CornerRadius=new CornerRadius(2),Margin=new Thickness(0,0,4,0)});
+            content.Children.Add(swatches);
+            var button=new Button {Padding=new Thickness(0),Margin=new Thickness(i%2==0 ? 0 : 4,0,i%2==0 ? 4 : 0,8),HorizontalContentAlignment=HorizontalAlignment.Stretch,Tag=i,
+                Template=template,Content=new Border {Background=PaletteBrush(palette,"background"),Padding=new Thickness(10),CornerRadius=new CornerRadius(5),Child=content}};
+            button.ToolTip=Text("点击预览，保存后生效","Click to preview; save to keep");button.Click+=(s,e)=>select(index);
+            Grid.SetColumn(button,i%2);Grid.SetRow(button,i/2);grid.Children.Add(button);buttons[i]=button;
+        }
+        return grid;
+    }
+    static void UpdatePresetCards(Button[] cards) {
+        for(int i=0;i<cards.Length;i++) {
+            var palette=Theme.Preset(i);bool selected=Theme.Keys.All(key=>string.Equals(Theme.Colors[key],palette[key],StringComparison.OrdinalIgnoreCase));
+            cards[i].BorderBrush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected ? "#78BEFF" : "#46536B"));
+            var content=(StackPanel)((Border)cards[i].Content).Child;
+            ((TextBlock)content.Children[0]).Text=Theme.PresetName(i,english)+(selected ? " ✓" : "");
+            cards[i].ToolTip=Text("点击预览，保存后生效","Click to preview; save to keep");
+        }
+    }
+    static void SaveColors(Dictionary<string,string> previous,bool preservePrevious) {
+        if(checking) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(ThemeFile()));
+        if(preservePrevious) File.WriteAllText(ThemeBackupFile(),new JavaScriptSerializer().Serialize(previous));
+        File.WriteAllText(ThemeFile(),new JavaScriptSerializer().Serialize(Theme.Colors));
+    }
     static void OpenSettings() {
         if (settingsOpen) return;
-        settingsOpen = true; collapseTimer.Stop(); DismissWelcome(false);
+        settingsOpen = true; collapseTimer.Stop(); bool guide=BeginSettingsVisit();
         var dialog = new Window { Width = 410, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
             Owner = checking ? null : window, WindowStartupLocation = WindowStartupLocation.CenterOwner, Topmost = true,
             Background = new SolidColorBrush(Color.FromRgb(32,36,44)), Foreground = Brushes.WhiteSmoke,
@@ -456,6 +502,21 @@ class QuotaWidget
         var widthLabel=new TextBlock();
         var commitWidth=AddNumberSetting(panel,widthLabel,100,480,baseWidth,"px",value=>{baseWidth=value;Render();SaveDisplayOptions();});
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
+        var savedColors=new Dictionary<string,string>(Theme.Colors);bool colorPending=false;
+        Button[] presetCards=null;
+        var colorNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=Brushes.LightSlateGray};
+        var saveColors=new Button {Padding=new Thickness(10,5,10,5),Margin=new Thickness(0,0,8,0),IsEnabled=false};
+        var cancelColors=new Button {Padding=new Thickness(10,5,10,5),IsEnabled=false};
+        var colorActions=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,10)};colorActions.Children.Add(saveColors);colorActions.Children.Add(cancelColors);
+        Action syncColors=()=>{UpdatePresetCards(presetCards);saveColors.IsEnabled=cancelColors.IsEnabled=colorPending;};
+        var presetGrid=CreatePresetCards(index=>{Theme.Colors=Theme.Preset(index);colorPending=true;ApplyTheme();syncColors();},out presetCards);
+        Action discardColors=()=>{Theme.Colors=new Dictionary<string,string>(savedColors);colorPending=false;ApplyTheme();syncColors();};
+        cancelColors.Click+=(s,e)=>discardColors();
+        saveColors.Click+=(s,e)=>{
+            try {SaveColors(savedColors,true);savedColors=new Dictionary<string,string>(Theme.Colors);colorPending=false;syncColors();}
+            catch(Exception ex) {MessageBox.Show(dialog,Text("配色无法保存：","Could not save colors: ")+ex.Message);}
+        };
+        dialog.Closed+=(s,e)=>{if(colorPending) discardColors();};
         var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
         var placementLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(placementLabel);
         var placement = new ComboBox { Margin = new Thickness(0,0,0,12) };
@@ -482,7 +543,7 @@ class QuotaWidget
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var done = new Button { Padding = new Thickness(10,5,10,5), IsCancel = true };
         actions.Children.Add(done); panel.Children.Add(actions);
-        var sizeHeading=new TextBlock(); var appearanceHeading=new TextBlock(); var toolbarHeading=new TextBlock();
+        var sizeHeading=new TextBlock(); var appearanceHeading=new TextBlock(); var toolbarHeading=new TextBlock();var languageHeading=new TextBlock();
         var toolbarElements=panel.Children.Cast<UIElement>().SkipWhile(element=>element!=toolbarOption).TakeWhile(element=>element!=actions).ToArray();
         panel.Children.Clear();
         var settingsHeading=new TextBlock {FontSize=20,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,16)};panel.Children.Add(settingsHeading);
@@ -492,18 +553,25 @@ class QuotaWidget
             foreach(var element in elements) content.Children.Add(element);
             panel.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,16),Child=content});
         };
-        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag,note});
-        group(appearanceHeading,new UIElement[]{languageLabel,language,colors});
-        group(toolbarHeading,toolbarElements);panel.Children.Add(actions);
+        group(languageHeading,new UIElement[]{languageLabel,language});
+        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag});
+        group(toolbarHeading,toolbarElements);
+        group(appearanceHeading,new UIElement[]{presetGrid,colorNote,colorActions,colors});panel.Children.Add(actions);
+        foreach(var item in new TextBlock[]{languageLabel,note,placementLabel}) if(guide) item.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
+        if(guide) toolbarOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         Action labels = () => {
-            dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言", "Language");
-            settingsHeading.Text=dialog.Title;sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("语言与外观","Language and appearance");toolbarHeading.Text=Text("按钮布局","Toolbar layout");
+            dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言（Language）", "Language");
+            settingsHeading.Text=dialog.Title;languageHeading.Text=Text("语言（Language）","Language");sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("配色","Colors");toolbarHeading.Text=Text("工具栏","Toolbar");
             scaleLabel.Text = Text("缩放比例", "Scale");
-            note.Text = Text("支持滚轮缩放。低于 60% 时文字可能难以辨认，建议只看条形。空间不足时自动隐藏文字。修改自动保存。", "Mouse wheel supported. Text may be hard to read below 60%; bars are recommended. Text hides when space is insufficient. Changes save automatically.");
+            note.Text = Text("滚轮缩放：鼠标放在悬浮窗上，滚动滚轮调整大小。低于 60% 时建议只看条形。修改自动保存。", "Mouse wheel: point at the widget and scroll to resize. Below 60%, bars are recommended. Changes save automatically.");
             thresholdLabel.Text=Text("文字隐藏阈值", "Hide text below");
             widthLabel.Text=Text("窗口宽度（100% 缩放时）", "Window width (at 100% scale)");
-            colors.Content = Text("配色设置…", "Colors…"); done.Content = Text("完成", "Done");
-            toolbarOption.Content = Text("收起时保留按钮", "Keep toolbar buttons when collapsed");
+            colors.Content = Text("自定义配色…", "Custom colors…"); done.Content = Text("完成", "Done");
+            colorNote.Text=Text("点击色卡预览。配色需保存；取消或关闭设置会恢复原配色。其他选项自动保存。","Click a card to preview. Save colors to keep; cancel or close settings to revert. Other options save automatically.");
+            saveColors.Content=Text("保存配色","Save colors");cancelColors.Content=Text("取消预览","Cancel preview");syncColors();
+            toolbarOption.Content = Text("收起时保留工具栏", "Keep toolbar when collapsed");
+            toolbarOption.ToolTip=Text("关闭后，只有展开窗口时才显示工具栏。","When disabled, the toolbar appears only while expanded.");
+            placementLabel.ToolTip=Text("上方工具栏向下展开，下方工具栏向上展开。","Top toolbar expands downward; bottom toolbar expands upward.");
             placementLabel.Text = Text("按钮栏位置", "Toolbar placement");
             ((ComboBoxItem)placement.Items[0]).Content = Text("下方 · 向上展开", "Bottom · expand upward");
             ((ComboBoxItem)placement.Items[1]).Content = Text("上方 · 向下展开", "Top · expand downward");
@@ -539,11 +607,29 @@ class QuotaWidget
         };
         input.LostKeyboardFocus += (s,e) => commit();
         input.KeyDown += (s,e) => { if (e.Key == System.Windows.Input.Key.Enter) { commit(); e.Handled = true; } };
-        colors.Click += (s,e) => OpenAppearance();
+        colors.Click += (s,e) => {
+            if(OpenAppearance(colorPending ? savedColors : null)) {savedColors=new Dictionary<string,string>(Theme.Colors);colorPending=false;}
+            syncColors();
+        };
         done.Click += (s,e) => { commit(); commitThreshold(); commitWidth(); dialog.Close(); };
         try {
             if (checking) {
+                var initialColors=new Dictionary<string,string>(savedColors);
+                for(int i=0;i<4;i++) {
+                    presetCards[i].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    if(!colorPending || !saveColors.IsEnabled || Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(i)[key])) throw new Exception("Settings preset card failed.");
+                }
+                cancelColors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if(colorPending || saveColors.IsEnabled || Theme.Keys.Any(key=>Theme.Colors[key]!=initialColors[key])) throw new Exception("Preset cancel rollback failed.");
+                presetCards[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));saveColors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                presetCards[1].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));discardColors();
+                if(colorPending || Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(0)[key])) throw new Exception("Saved palette not retained after later rollback.");
+                savedColors=initialColors;discardColors();
+                if(panel.Children.OfType<Border>().Count()!=4 || languageHeading.Text!=Text("语言（Language）","Language") || languageLabel.Text!=Text("语言（Language）","Language")) throw new Exception("Settings grouping / bilingual language title failed.");
+                bool guidanceShown=note.Foreground.ToString()=="#FFFFB580";
+                if(guidanceShown!=guide || ((SolidColorBrush)toolbarOption.Foreground).Color!=((SolidColorBrush)(guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke)).Color) throw new Exception("Settings guide visibility failed.");
                 double before = zoom; bool wasEnglish = english;
+                bool beforeTop=toolbarTop;var beforeOrder=(string[])toolbarOrder.Clone();
                 double oldThreshold=textThreshold,oldWidth=baseWidth;
                 var numberRows=new[]{scaleRow,(Grid)thresholdLabel.Tag,(Grid)widthLabel.Tag};
                 var thresholdInput=numberRows[1].Children.OfType<TextBox>().Single();
@@ -578,12 +664,15 @@ class QuotaWidget
                 if (english == wasEnglish || dialog.Title != Text("系统设置", "Settings")) throw new Exception("Settings language selection failed.");
                 language.SelectedIndex = wasEnglish ? 1 : 0;
                 colors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                toolbarTop=beforeTop;toolbarOrder=beforeOrder;syncOrder();
                 SetZoom(before);
+                slider.Value=before*100;input.Text=(before*100).ToString("0",CultureInfo.InvariantCulture);
                 panel.Measure(new Size(dialog.Width-36,double.PositiveInfinity)); panel.Arrange(new Rect(panel.DesiredSize)); panel.UpdateLayout();
                 var bitmap = new RenderTargetBitmap((int)dialog.Width,(int)Math.Ceiling(panel.DesiredSize.Height+36),96,96,PixelFormats.Pbgra32);
                 var drawing = new DrawingVisual(); using (var context = drawing.RenderOpen()) { context.DrawRectangle(dialog.Background,null,new Rect(0,0,bitmap.PixelWidth,bitmap.PixelHeight)); context.PushTransform(new TranslateTransform(18,18)); context.DrawRectangle(new VisualBrush(panel),null,new Rect(panel.RenderSize)); }
                 bitmap.Render(drawing); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                 using (var stream = File.Create(settingsPreviewPath)) encoder.Save(stream);
+                SavePanelPreview(presetGrid,dialog.Background,338,Path.Combine(Path.GetDirectoryName(settingsPreviewPath),english ? "preset-cards-en.png" : "preset-cards-zh.png"));
             } else {
                 dialog.WindowStartupLocation = WindowStartupLocation.Manual;
                 panel.Measure(new Size(dialog.Width,double.PositiveInfinity));
@@ -591,7 +680,7 @@ class QuotaWidget
                 dialog.ContentRendered += (s,e) => PositionSettings(dialog);
                 dialog.ShowDialog();
             }
-        } finally { settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
+        } finally { if(colorPending) discardColors();settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
     }
     static string settingsPreviewPath;
     static void CheckToolbarLayout(string report) {
@@ -840,6 +929,7 @@ class QuotaWidget
         File.WriteAllText(report,"PASS: realized-window lock expansion and scale transitions update height immediately in both languages; settings above owner, resize following, below fallback; wheel redraw burst starts and stops. No network calls or preference writes. Physical wheel gestures not exercised.\r\n"+string.Join("\r\n",observations));
     }
     static string ThemeFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()), "colors.json"); }
+    static string ThemeBackupFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"colors-before-preset.json"); }
     static void LoadTheme() {
         try {
             if (!File.Exists(ThemeFile())) return;
@@ -876,20 +966,30 @@ class QuotaWidget
         foreach (string name in new[] { "HourValue", "WeekValue" }) Control<TextBlock>(name).Foreground = Theme.Brush("valueText");
         foreach (string name in new[] { "HourReset", "WeekReset" }) Control<TextBlock>(name).Foreground = Theme.Brush("timeText");
 
-        Control<Button>("SettingsButton").ToolTip = Text("系统设置 · 语言、配色、缩放（也可滚轮缩放）", "Settings · language, colors, scale (or use the mouse wheel)");
+        UpdateSettingsHint();
         Render();
     }
-    static void OpenAppearance() {
-        if (appearanceOpen) return;
+    static bool OpenAppearance(Dictionary<string,string> presetBackup=null) {
+        if (appearanceOpen) return false;
         appearanceOpen = true; collapseTimer.Stop(); SetExpanded(true);
         var original = new Dictionary<string,string>(Theme.Colors);
         bool accepted = false;
+        bool presetApplied=presetBackup!=null;
         var dialog = new Window { Owner = checking ? null : (settingsWindow ?? window), Title = Text("外观设置", "Appearance"), Width = 470, Height = 610,
             MinWidth = 430, MinHeight = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner, Topmost = true,
             Background = new SolidColorBrush(Color.FromRgb(27,33,48)), Foreground = Brushes.WhiteSmoke, FontSize = 13 };
+        dialog.Resources=SettingsStyles();
         var panel = new DockPanel { Margin = new Thickness(16) }; dialog.Content = panel;
         var help = new TextBlock { Text = Text("点击色块选色，或输入 #RRGGBB / #AARRGGBB。修改即时预览。", "Click a swatch or enter #RRGGBB / #AARRGGBB. Changes preview immediately."), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,12) };
         DockPanel.SetDock(help,Dock.Top); panel.Children.Add(help);
+        var presetsRow=new Grid {Margin=new Thickness(0,0,0,12)};
+        presetsRow.ColumnDefinitions.Add(new ColumnDefinition());presetsRow.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
+        var presets=new ComboBox {Margin=new Thickness(0,0,8,0)};
+        presets.Items.Add(Text("选择配色预设…","Choose a color preset…"));
+        for(int i=0;i<4;i++) presets.Items.Add(Theme.PresetName(i,english));
+        presets.SelectedIndex=0;presetsRow.Children.Add(presets);
+        var restore=new Button {Content=Text("恢复上次配色","Restore previous"),Padding=new Thickness(8,5,8,5)};
+        Grid.SetColumn(restore,1);presetsRow.Children.Add(restore);DockPanel.SetDock(presetsRow,Dock.Top);panel.Children.Add(presetsRow);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0,12,0,0) };
         DockPanel.SetDock(actions,Dock.Bottom); panel.Children.Add(actions);
         var reset = new Button { Content = Text("恢复默认", "Defaults"), Padding = new Thickness(10,5,10,5), Margin = new Thickness(0,0,8,0) };
@@ -898,8 +998,12 @@ class QuotaWidget
         actions.Children.Add(reset); actions.Children.Add(cancel); actions.Children.Add(save);
         var list = new StackPanel(); panel.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var editors = new Dictionary<string,TextBox>();
-        for (int i=0;i<Theme.Keys.Length;i++) {
-            string key = Theme.Keys[i];
+        string[][] groups={new[]{"quotaGreen","quotaYellow","quotaOrange","quotaRed"},new[]{"timeGreen","timeYellow","timeOrange","timeRed"},new[]{"title","label","valueText","timeText","caption"},new[]{"background","windowBorder","barBorder","track"},new[]{"ticks","weekMarker","icons","status","alert","failure"}};
+        string[] headings=english ? new[]{"Quota bar","Countdown bar","Text","Borders and background","Ticks and indicators"} : new[]{"额度条","倒计时条","文字","边框与背景","刻度与提示"};
+        for(int groupIndex=0;groupIndex<groups.Length;groupIndex++) {
+            list.Children.Add(new TextBlock {Text=headings[groupIndex],FontWeight=FontWeights.Bold,FontSize=14,Foreground=new SolidColorBrush(Color.FromRgb(145,167,199)),Margin=new Thickness(0,groupIndex==0 ? 0 : 14,0,8)});
+            foreach(string key in groups[groupIndex]) {
+            int i=Array.IndexOf(Theme.Keys,key);
             var row = new Grid { Margin = new Thickness(0,0,0,8) };
             row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) }); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(115) });
             var label = new TextBlock { Text = english ? Theme.English[i] : Theme.Chinese[i], VerticalAlignment = VerticalAlignment.Center }; row.Children.Add(label);
@@ -917,17 +1021,44 @@ class QuotaWidget
                 }
             };
             list.Children.Add(row);
+            }
         }
         reset.Click += (s,e) => { var defaults = Theme.Defaults(); foreach (string key in Theme.Keys) editors[key].Text = defaults[key]; };
+        presets.SelectionChanged+=(s,e)=>{
+            if(presets.SelectedIndex<1) return;
+            var colors=Theme.Preset(presets.SelectedIndex-1);
+            foreach(string key in Theme.Keys) editors[key].Text=colors[key];
+            presetApplied=true;
+        };
+        restore.Click+=(s,e)=>{
+            var previous=new Dictionary<string,string>(original);
+            try {
+                if(!checking && File.Exists(ThemeBackupFile())) {
+                    var saved=new JavaScriptSerializer().Deserialize<Dictionary<string,string>>(File.ReadAllText(ThemeBackupFile()));
+                    foreach(string key in Theme.Keys) if(saved!=null && saved.ContainsKey(key) && Theme.Valid(saved[key])) previous[key]=saved[key];
+                }
+            } catch(IOException) {} catch(UnauthorizedAccessException) {} catch(ArgumentException) {}
+            foreach(string key in Theme.Keys) editors[key].Text=previous[key];
+            presets.SelectedIndex=0;presetApplied=false;
+        };
         cancel.Click += (s,e) => dialog.Close();
         save.Click += (s,e) => {
             try {
-                if (!checking) { Directory.CreateDirectory(Path.GetDirectoryName(ThemeFile())); File.WriteAllText(ThemeFile(),new JavaScriptSerializer().Serialize(Theme.Colors)); }
+                if (!checking) {
+                    SaveColors(presetBackup ?? original,presetApplied);
+                }
                 accepted = true; dialog.Close();
             } catch (Exception ex) { MessageBox.Show(dialog,Text("颜色设置无法保存：", "Could not save colors: ") + ex.Message); }
         };
         try {
             if (checking) {
+                if(list.Children.OfType<TextBlock>().Count()!=5 || editors.Count!=Theme.Keys.Length) throw new Exception("Color groups incomplete.");
+                for(int i=1;i<=4;i++) {
+                    presets.SelectedIndex=i;
+                    if(Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(i-1)[key])) throw new Exception("Preset incomplete.");
+                }
+                restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if(Theme.Keys.Any(key=>Theme.Colors[key]!=original[key])) throw new Exception("Custom theme restore failed.");
                 editors["quotaGreen"].Text = "#123456";
                 if (Theme.Colors["quotaGreen"] != "#123456") throw new Exception("Color preview failed.");
                 editors["quotaGreen"].Text = "invalid";
@@ -938,15 +1069,31 @@ class QuotaWidget
                 if (Theme.Keys.Any(key => decoded[key] != Theme.Colors[key])) throw new Exception("Color serialization failed.");
                 editors["background"].Text = "#FF223344";
                 if (Control<Border>("Root").Background.ToString() != "#FF223344") throw new Exception("Background preview failed.");
+                if(settingsPreviewPath!=null) SavePanelPreview(list,dialog.Background,438,Path.Combine(Path.GetDirectoryName(settingsPreviewPath),english ? "color-groups-en.png" : "color-groups-zh.png"));
             } else dialog.ShowDialog();
         }
         finally { if (!accepted) Theme.Colors = original; appearanceOpen = false; ApplyTheme(); if (!window.IsMouseOver) collapseTimer.Start(); }
+        return accepted;
+    }
+    static void SavePanelPreview(FrameworkElement panel,Brush background,double width,string path) {
+        var parent=panel.Parent as Panel;int index=parent==null ? -1 : parent.Children.IndexOf(panel);
+        var owner=panel.Parent as ContentControl;
+        if(parent!=null) parent.Children.Remove(panel);else if(owner!=null) owner.Content=null;
+        double previousWidth=panel.Width;panel.Width=width;panel.InvalidateMeasure();
+        try {
+        panel.Measure(new Size(width,double.PositiveInfinity));panel.Arrange(new Rect(0,0,width,panel.DesiredSize.Height));panel.UpdateLayout();
+        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(width+32),(int)Math.Ceiling(panel.DesiredSize.Height+32),96,96,PixelFormats.Pbgra32);
+        var drawing=new DrawingVisual();using(var context=drawing.RenderOpen()){context.DrawRectangle(background,null,new Rect(0,0,bitmap.PixelWidth,bitmap.PixelHeight));context.PushTransform(new TranslateTransform(16,16));context.DrawRectangle(new VisualBrush(panel){AutoLayoutContent=false,Stretch=Stretch.None,AlignmentX=AlignmentX.Left,AlignmentY=AlignmentY.Top},null,new Rect(panel.RenderSize));}
+        bitmap.Render(drawing);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var stream=File.Create(path)) encoder.Save(stream);
+        } finally {panel.Width=previousWidth;if(parent!=null) parent.Children.Insert(index,panel);else if(owner!=null) owner.Content=panel;}
     }
     static Brush LightenIcon(Color color, double amount) {
+        var background=((SolidColorBrush)Theme.Brush("background")).Color;
+        double target=(background.R*0.2126+background.G*0.7152+background.B*0.0722)>160 ? 0 : 255;
         return new SolidColorBrush(Color.FromArgb(color.A,
-            (byte)Math.Round(color.R+(255-color.R)*amount),
-            (byte)Math.Round(color.G+(255-color.G)*amount),
-            (byte)Math.Round(color.B+(255-color.B)*amount)));
+            (byte)Math.Round(color.R+(target-color.R)*amount),
+            (byte)Math.Round(color.G+(target-color.G)*amount),
+            (byte)Math.Round(color.B+(target-color.B)*amount)));
     }
     static string PreferenceFile() {
         string local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
@@ -970,7 +1117,7 @@ class QuotaWidget
         Control<TextBlock>("TitleLabel").Text = window.Title;
         Control<TextBlock>("HourLabel").Text = Text("5 小时剩余", "5-hour remaining");
         Control<TextBlock>("WeekLabel").Text = Text("本周剩余", "Weekly remaining");
-        Control<Button>("SettingsButton").ToolTip = Text("系统设置 · 语言、配色、缩放（也可滚轮缩放）", "Settings · language, colors, scale (or use the mouse wheel)");
+        UpdateSettingsHint();
 
         Control<TextBlock>("CompactHourLabel").Text = Text("5小时", "5h");
         Control<TextBlock>("CompactWeekLabel").Text = Text("周", "Wk");
@@ -1057,7 +1204,7 @@ class QuotaWidget
             try { window.DragMove(); }
             finally { dragging = false; if (!window.IsMouseOver) collapseTimer.Start(); }
         };
-        window.Closed += (s, e) => { collapseTimer.Stop(); zoomPaintTimer.Stop(); if (welcomePopup != null) welcomePopup.IsOpen = false; };
+        window.Closed += (s, e) => { collapseTimer.Stop(); zoomPaintTimer.Stop(); };
         ApplyLanguage(); ResizeWidget();
     }
     static string FindCodex() {
@@ -1297,10 +1444,17 @@ class QuotaWidget
         return span.TotalDays >= 1 ? string.Format(Text("{0}天 {1}小时后重置", "Resets in {0}d {1}h"), (int)span.TotalDays, span.Hours)
             : string.Format(Text("{0}小时 {1}分后重置", "Resets in {0}h {1}m"), (int)span.TotalHours, span.Minutes);
     }
-    static string CompactReset(Limit limit) {
+    static string CompactReset(Limit limit, bool weekly=false) {
         if (limit == null || limit.Reset == 0) return "—";
-        var span = DateTimeOffset.FromUnixTimeSeconds(limit.Reset) - DateTimeOffset.UtcNow;
+        return FormatCompactReset(limit.Reset,DateTimeOffset.UtcNow,weekly);
+    }
+    static string FormatCompactReset(long reset,DateTimeOffset now,bool weekly) {
+        var span = DateTimeOffset.FromUnixTimeSeconds(reset) - now;
+        // Weekly text stays day-sized until the last day; the thin timer uses exact
+        // time independently, while the reference arrow advances once per day.
+        if(weekly && span.TotalHours>=24) return Math.Ceiling(span.TotalDays).ToString("0",CultureInfo.InvariantCulture)+Text("天","d");
         long minutes = Math.Max(0, (long)Math.Ceiling(span.TotalMinutes));
+        if(weekly) return (Math.Min(1439,minutes)/60).ToString()+":"+(Math.Min(1439,minutes)%60).ToString("00");
         return (minutes >= 1440 ? (minutes / 1440).ToString() + "d " : "")
             + ((minutes / 60) % 24).ToString() + ":" + (minutes % 60).ToString("00");
     }
@@ -1315,8 +1469,11 @@ class QuotaWidget
         return remaining > 60 ? Red : remaining > 40 ? Orange : remaining > 20 ? Yellow : Green;
     }
     static double TimePercent(Limit limit, double hours) {
+        return TimePercentAt(limit,hours,DateTimeOffset.UtcNow);
+    }
+    static double TimePercentAt(Limit limit,double hours,DateTimeOffset now) {
         return limit.Reset == 0 ? 0 : Math.Max(0, Math.Min(100,
-            (DateTimeOffset.FromUnixTimeSeconds(limit.Reset) - DateTimeOffset.UtcNow).TotalHours / hours * 100));
+            (DateTimeOffset.FromUnixTimeSeconds(limit.Reset) - now).TotalHours / hours * 100));
     }
     static void StyleQuota(string prefix, Limit limit, double hours) {
         Brush quota = QuotaColor(limit.Remaining);
@@ -1334,8 +1491,8 @@ class QuotaWidget
         }
         Control<TextBlock>(prefix + "Reset").Foreground = Theme.Brush("timeText");
         Control<TextBlock>("Compact" + prefix + "Reset").Foreground = Theme.Brush("timeText");
-        Control<ProgressBar>("Compact" + prefix + "Bar").Uid = limit.Remaining.ToString("0.#") + "% · " + CompactReset(limit);
-        Control<ProgressBar>("Compact" + prefix + "TimeBar").Uid = CompactReset(limit);
+        Control<ProgressBar>("Compact" + prefix + "Bar").Uid = limit.Remaining.ToString("0.#") + "% · " + CompactReset(limit,prefix=="Week");
+        Control<ProgressBar>("Compact" + prefix + "TimeBar").Uid = CompactReset(limit,prefix=="Week");
     }
     static T Control<T>(string name) where T : class { return window.FindName(name) as T; }
     static void ShowLimit(string prefix, bool show) {
@@ -1355,7 +1512,7 @@ class QuotaWidget
         if (limit == null) return;
         Control<TextBlock>(prefix+"Value").Text = limit.Remaining.ToString("0.#") + "%";
         Control<ProgressBar>(prefix+"Bar").Value = Control<ProgressBar>("Compact"+prefix+"Bar").Value = limit.Remaining;
-        Control<TextBlock>(prefix+"Reset").Text = Control<TextBlock>("Compact"+prefix+"Reset").Text = CompactReset(limit);
+        Control<TextBlock>(prefix+"Reset").Text = Control<TextBlock>("Compact"+prefix+"Reset").Text = CompactReset(limit,prefix=="Week");
         StyleQuota(prefix,limit,hours);
         if(prefix=="Week") foreach(string name in new[]{"WeekBar","CompactWeekBar","WeekTimeBar","CompactWeekTimeBar","WeekGap","CompactWeekGap","WeekMarker","CompactWeekMarker"}) {
             Control<ProgressBar>(name).DataContext=WeeklyDayMarker(limit.Reset,DateTimeOffset.UtcNow);
@@ -1379,7 +1536,7 @@ class QuotaWidget
     static void UpdateRefreshStatus() {
         string state=activeReading ? "querying" : queryFailed || localReadWarning.Length>0 ? "failed" : snapshot==null || DataIsStale() ? "stale" : "normal";
         var button=Control<Button>("RefreshButton");
-        string hex=state=="querying" ? "#70B8FF" : state=="failed" ? "#B95F6A" : state=="stale" ? "#C17D4D" : Theme.Colors["icons"];
+        string hex=Theme.Colors[state=="querying" ? "weekMarker" : state=="failed" ? "failure" : state=="stale" ? "alert" : "icons"];
         var color=(Color)ColorConverter.ConvertFromString(hex);
         button.Resources["ToolbarNormal"]=new SolidColorBrush(color);
         button.Resources["ToolbarHover"]=LightenIcon(color,0.35);
@@ -1546,7 +1703,7 @@ class QuotaWidget
         foreach (bool en in new[] {false,true}) {
             SelectLanguage(en); settingsPreviewPath = Path.Combine(folder,en ? "settings-en.png" : "settings-zh.png");
             Control<Button>("SettingsButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            ShowWelcome();
+            UpdateSettingsHint();
         }
         foreach (double amount in new[] { 79.5, 85, 90.5, 99.5, 100 }) {
             snapshot.Hour.Remaining = snapshot.Week.Remaining = amount;
@@ -1716,14 +1873,7 @@ class QuotaWidget
     }
     static void CheckAlignedLayout(string report) {
         var now=DateTimeOffset.UtcNow;var folder=Path.GetDirectoryName(report);
-        foreach(string kind in new[]{"quota-detail","quota-center","quota-week-detail","time"}) {
-            var ticks=new SegmentedVisual {Width=200,Height=20,Kind=kind,Caption="",Value=50,Fill=Brushes.Green};
-            ticks.Measure(new Size(200,20));ticks.Arrange(new Rect(0,0,200,20));ticks.UpdateLayout();
-            var tickBitmap=new RenderTargetBitmap(200,20,96,96,PixelFormats.Pbgra32);tickBitmap.Render(ticks);
-            var lines=FlattenDrawings(VisualTreeHelper.GetDrawing(ticks)).OfType<GeometryDrawing>().Where(d=>d.Geometry is LineGeometry).ToArray();
-            double expectedWidth=kind=="quota-detail" ? 1.5 : kind=="quota-center" ? 3 : kind=="time" ? 3.5 : 2;
-            if(lines.Length!=(kind.Contains("week") ? 6 : 4) || lines.Any(d=>Math.Abs(d.Pen.Thickness-expectedWidth)>0.001)) throw new Exception("Tick count/thickness regression: "+kind);
-        }
+        CheckTickDrawing();
         snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=49,Reset=now.ToUnixTimeSeconds()+14340},Week=new Limit {Remaining=90,Reset=now.ToUnixTimeSeconds()+495540}};
         window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();
         foreach(bool en in new[]{false,true}) foreach(bool top in new[]{false,true}) foreach(double width in new[]{100.0,150.0,165.0,180.0,200.0,201.0,280.0,360.0,480.0}) foreach(double scale in new[]{0.4,0.8,1.0,1.5}) foreach(bool details in new[]{false,true}) {
@@ -1745,7 +1895,7 @@ class QuotaWidget
             foreach(string name in DefaultToolbarOrder) {
                 var button=Control<Button>(name);var origin=button.TranslatePoint(new Point(0,0),toolbar);
                 if(origin.X < -1 || origin.X+button.ActualWidth>toolbar.ActualWidth+1) throw new Exception("Toolbar overflow.");
-                if(top && full) {
+                if(full && Control<TextBlock>("TitleLabel").Visibility==Visibility.Visible) {
                     var title=Control<TextBlock>("TitleLabel");var titleOrigin=title.TranslatePoint(new Point(0,0),toolbar);
                     if(title.Parent!=toolbar || Math.Abs(titleOrigin.Y+title.ActualHeight-origin.Y-button.ActualHeight)>1) throw new Exception("Title/buttons bottom alignment failed.");
                     if(titleOrigin.X+title.ActualWidth>origin.X+1) throw new Exception("Title/buttons overlap.");
@@ -1774,7 +1924,7 @@ class QuotaWidget
         if(markerVisual.Kind!="week-marker-overlay" || Math.Abs(markerVisual.DayMarker-5.0/7)>0.001) throw new Exception("Single weekly overlay binding failed.");
         var bitmap=new RenderTargetBitmap((int)Math.Ceiling(marker.ActualWidth),(int)Math.Ceiling(marker.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(markerVisual);
         int stride=bitmap.PixelWidth*4;var pixels=new byte[stride*bitmap.PixelHeight];bitmap.CopyPixels(pixels,stride,0);
-        int center=(int)Math.Round(marker.ActualWidth*5/7),start=bitmap.PixelHeight-8;
+        int center=(int)Math.Round(marker.ActualWidth*5/7),start=bitmap.PixelHeight-6;
         for(int y=start;y<bitmap.PixelHeight-1;y++) {
             bool blue=false;for(int x=Math.Max(0,center-2);x<=Math.Min(bitmap.PixelWidth-1,center+2);x++){int offset=y*stride+x*4;if(pixels[offset+3]>60 && pixels[offset]>pixels[offset+2] && pixels[offset+1]>pixels[offset+2]) blue=true;}
             if(!blue) throw new Exception("Marker line has a gap at row "+y);
@@ -1782,7 +1932,7 @@ class QuotaWidget
         foreach(string state in new[]{"normal","stale","failed","querying"}) {
             activeReading=state=="querying";queryFailed=state=="failed";snapshot.Time=state=="stale" ? now.AddMinutes(-6) : now;localReadWarning="";Render();window.UpdateLayout();
             var refresh=Control<Button>("RefreshButton");if((string)refresh.Tag!=state) throw new Exception("Refresh status color state failed.");
-            string expected=state=="normal" ? Theme.Colors["icons"] : state=="stale" ? "#C17D4D" : state=="failed" ? "#B95F6A" : "#70B8FF";
+            string expected=Theme.Colors[state=="normal" ? "icons" : state=="stale" ? "alert" : state=="failed" ? "failure" : "weekMarker"];
             if(((SolidColorBrush)refresh.Foreground).Color!=(Color)ColorConverter.ConvertFromString(expected)) throw new Exception("Refresh status brush failed.");
             SavePreview(Path.Combine(folder,"refresh-"+state+".png"));
         }
@@ -1790,9 +1940,105 @@ class QuotaWidget
         var oldColors=new Dictionary<string,string>(Theme.Colors);Theme.Colors["track"]="#303640";Theme.Colors["barBorder"]="#15181E";UpgradeLegacyContrast();
         if(Theme.Colors["track"]!="#414B5B" || Theme.Colors["barBorder"]!="#77859B") throw new Exception("Legacy default contrast migration failed.");
         Theme.Colors["track"]="#123456";UpgradeLegacyContrast();if(Theme.Colors["track"]!="#123456") throw new Exception("Custom color overwritten.");Theme.Colors=oldColors;ApplyTheme();
+        foreach(bool en in new[]{false,true}) {
+            english=en;
+            var boundaryNow=DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
+            if(FormatCompactReset(now.ToUnixTimeSeconds()+86400,boundaryNow,true)!=Text("1天","1d") || FormatCompactReset(now.ToUnixTimeSeconds()+86401,boundaryNow,true)!=Text("2天","2d")
+                || FormatCompactReset(now.ToUnixTimeSeconds()+86399,boundaryNow,true)!="23:59" || FormatCompactReset(now.ToUnixTimeSeconds()+3660,boundaryNow,true)!="1:01" || FormatCompactReset(now.ToUnixTimeSeconds()-1,boundaryNow,true)!="0:00") throw new Exception("Weekly countdown boundary failed.");
+        }
+        SelectLanguage(false);toolbarTop=false;baseWidth=280;SetZoom(1);SetExpanded(true);settingsVisits=0;UpdateSettingsHint();window.UpdateLayout();
+        if(Control<Button>("SettingsButton").Foreground.ToString()!="#FFE5484D") throw new Exception("First-run settings highlight failed.");
+        SavePreview(Path.Combine(folder,"first-run-bottom-expanded.png"));
+        for(int visit=1;visit<=3;visit++) {
+            if(visit==3) SelectLanguage(true);
+            settingsPreviewPath=Path.Combine(folder,"settings-visit-"+visit+".png");OpenSettings();
+            if(settingsVisits!=Math.Min(2,visit) || Control<Button>("SettingsButton").Resources.Contains("ToolbarNormal")) throw new Exception("Settings visit / icon acknowledgment failed.");
+        }
+        SelectLanguage(false);
+        for(int i=0;i<4;i++) {
+            Theme.Colors=Theme.Preset(i);ApplyTheme();SetExpanded(false);window.UpdateLayout();
+            var weekly=Control<ProgressBar>("CompactWeekMarker");weekly.ApplyTemplate();var visual=Children(weekly).OfType<SegmentedVisual>().Single();
+            if((double)visual.GetValue(SegmentedVisual.MarkerWidthProperty)!=3.5) throw new Exception("Compact marker width mismatch.");
+            SavePreview(Path.Combine(folder,"preset-"+i+"-compact.png"));
+            SetExpanded(true);window.UpdateLayout();
+            if((double)Children(Control<ProgressBar>("WeekMarker")).OfType<SegmentedVisual>().Single().GetValue(SegmentedVisual.MarkerWidthProperty)!=2.0) throw new Exception("Expanded marker width mismatch.");
+            SavePreview(Path.Combine(folder,"preset-"+i+"-expanded.png"));
+            SetZoom(0.4);window.UpdateLayout();
+            if((double)visual.GetValue(SegmentedVisual.MarkerWidthProperty)!=2.0) throw new Exception("Hidden-text marker width mismatch.");
+            SetZoom(1);
+        }
+        Theme.Colors=oldColors;ApplyTheme();
         snapshot.Hour=null;Render();window.UpdateLayout();if(Control<Grid>("WeekPair").Visibility!=Visibility.Visible) throw new Exception("Weekly-only pair hidden.");
         snapshot.Week=null;Render();window.UpdateLayout();if(Control<Grid>("WeekPair").Visibility!=Visibility.Collapsed || Control<ProgressBar>("CompactWeekMarker").Visibility!=Visibility.Collapsed) throw new Exception("Absent week marker not hidden.");
-        File.WriteAllText(report,"PASS: bilingual, both toolbar placements, widths100/150/165/180/200/201/280/360/480 at40/80/100/150%; expanded layout does not widen or fall back, shared detail columns, hidden timestamps, title font13 bold with narrow fallback, icon visible gaps <=7.1px; inline label template binding and threshold, old text controls hidden, shared drawing baseline; weekly overlay continuity, refresh states, default color migration, nullable visibility.\r\nRealized offline WPF layout and previews. No live queries or preference writes. Physical mouse/restart and live failures not exercised.\r\n");
+        File.WriteAllText(report,"PASS: bilingual, both toolbar placements, widths100/150/165/180/200/201/280/360/480 at40/80/100/150%; fixed widths, aligned detail columns, bottom/top title and icons on one row, narrow title fallback/hiding, compact icon gaps, text threshold; weekly marker continuity and widths2/3.5, customizable marker, four complete presets and custom restore/cancel; four settings groups, bilingual language heading, first-run red gear, guidance only on first two settings visits; weekly day rounding and last-day hour/minute boundaries; refresh states, legacy theme migration, nullable visibility.\r\nRealized offline WPF layout and previews. No live queries or user preference writes. Physical mouse gestures, actual saved-preference reload and live failures not exercised.\r\n");
+    }
+    static void CheckTickDrawing() {
+        foreach(string kind in new[]{"quota-detail","quota-center","quota-week-detail","quota-week-center","time","time-week"}) {
+            var ticks=new SegmentedVisual {Width=200,Height=20,Kind=kind,Caption="",Value=50,Fill=Brushes.Green};
+            ticks.Measure(new Size(200,20));ticks.Arrange(new Rect(0,0,200,20));ticks.UpdateLayout();
+            var bitmap=new RenderTargetBitmap(200,20,96,96,PixelFormats.Pbgra32);bitmap.Render(ticks);
+            var lines=FlattenDrawings(VisualTreeHelper.GetDrawing(ticks)).OfType<GeometryDrawing>().Where(d=>d.Geometry is LineGeometry).ToArray();
+            bool time=kind.StartsWith("time"),week=kind.Contains("week"),detail=kind.Contains("detail");
+            int majorCount=time && week ? 6 : 4;
+            if(lines.Length!=(!time ? 9 : majorCount)) throw new Exception("Tick count incorrect: "+kind);
+            double majorWidth=(detail ? 2 : 3.5)-(time || week ? 0 : 0.5);
+            for(int i=0;i<lines.Length;i++) {
+                var line=(LineGeometry)lines[i].Geometry;bool minor=i>=majorCount;
+                double expectedX=minor ? (10+(i-majorCount)*20)*2 : (time && week ? (i+1)*200.0/7 : (i+1)*40);
+                double expectedY=minor ? (detail ? 15 : 17.5) : time ? 0 : detail ? 10 : 15;
+                double minorWidth=detail && !week ? 1.5 : 2;
+                if(Math.Abs(lines[i].Pen.Thickness-(minor ? minorWidth : majorWidth))>0.001 || Math.Abs(line.StartPoint.X-expectedX)>0.001 || Math.Abs(line.StartPoint.Y-expectedY)>0.001 || line.EndPoint.Y!=20) throw new Exception("Tick geometry incorrect: "+kind);
+            }
+        }
+    }
+    static void CheckWeeklyTicks(string report) {
+        CheckTickDrawing();
+        var now=DateTimeOffset.UtcNow;snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=72,Reset=now.ToUnixTimeSeconds()+14340},Week=new Limit {Remaining=49,Reset=now.ToUnixTimeSeconds()+495540}};
+        window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();
+        baseWidth=280;toolbarTop=false;Theme.Colors=Theme.Preset(0);ApplyTheme();
+        foreach(double scale in new[]{0.6,1.0}) foreach(bool full in new[]{false,true}) {
+            SelectLanguage(false);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
+            SavePreview(Path.Combine(Path.GetDirectoryName(report),"weekly-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
+        }
+        File.WriteAllText(report,"PASS: hourly and weekly quota four major ticks at20/40/60/80 and five minor ticks at10/30/50/70/90; major/minor heights and widths in compact, expanded and hidden-text styles; hourly countdown four equal ticks and weekly countdown six equal ticks unchanged. WPF previews at60/100%. No network queries or preference writes.\r\n");
+    }
+    static double ColorLuminance(string hex) {
+        var color=(Color)ColorConverter.ConvertFromString(hex);
+        Func<byte,double> channel=value=>{double c=value/255.0;return c<=0.04045 ? c/12.92 : Math.Pow((c+0.055)/1.055,2.4);};
+        return channel(color.R)*0.2126+channel(color.G)*0.7152+channel(color.B)*0.0722;
+    }
+    static double ColorContrast(string first,string second) {
+        double a=ColorLuminance(first),b=ColorLuminance(second);return (Math.Max(a,b)+0.05)/(Math.Min(a,b)+0.05);
+    }
+    static void CheckColorSettings(string report) {
+        var folder=Path.GetDirectoryName(report);var original=new Dictionary<string,string>(Theme.Colors);var notes=new List<string>();
+        var now=DateTimeOffset.UtcNow;snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=72,Reset=now.ToUnixTimeSeconds()+14340},Week=new Limit {Remaining=49,Reset=now.ToUnixTimeSeconds()+495540}};
+        double before=TimePercentAt(snapshot.Week,168,now),after=TimePercentAt(snapshot.Week,168,now.AddMinutes(1));
+        if(Math.Abs((before-after)-100.0/(7*24*60))>0.000001 || WeeklyDayMarker(snapshot.Week.Reset,now)!=WeeklyDayMarker(snapshot.Week.Reset,now.AddMinutes(1))
+            || FormatCompactReset(snapshot.Week.Reset,now,true)!=FormatCompactReset(snapshot.Week.Reset,now.AddMinutes(1),true)) throw new Exception("Precise weekly timer coupled to day-sized text/arrow.");
+        window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();
+        baseWidth=280;toolbarTop=false;settingsVisits=2;SetZoom(1);SetExpanded(true);
+        foreach(bool en in new[]{false,true}) {SelectLanguage(en);settingsPreviewPath=Path.Combine(folder,en ? "settings-en.png" : "settings-zh.png");OpenSettings();}
+        for(int i=0;i<4;i++) {
+            var palette=Theme.Preset(i);
+            double minimum=palette.Where(pair=>pair.Key.StartsWith("quota") || pair.Key.StartsWith("time") && pair.Key!="timeText" || pair.Key=="track").Min(pair=>ColorContrast(palette["caption"],pair.Value));
+            if(minimum<4.5) throw new Exception("Preset text contrast below 4.5: "+Theme.PresetName(i,true)+" "+minimum);
+            if(ColorContrast(palette["icons"],palette["background"])<3 || ColorContrast(palette["failure"],palette["background"])<3 || ColorContrast(palette["weekMarker"],palette["track"])<3) throw new Exception("Preset indicator contrast below 3.");
+            notes.Add(Theme.PresetName(i,true)+": minimum text contrast "+minimum.ToString("0.00",CultureInfo.InvariantCulture));
+            Theme.Colors=palette;ApplyTheme();
+            foreach(bool en in new[]{false,true}) foreach(double scale in new[]{0.6,1.0,1.5}) foreach(bool full in new[]{false,true}) {
+                SelectLanguage(en);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
+                var marker=Control<ProgressBar>(full && scale>=textThreshold ? "WeekMarker" : "CompactWeekMarker");marker.ApplyTemplate();
+                var visual=Children(marker).OfType<SegmentedVisual>().Single();
+                var markerBitmap=new RenderTargetBitmap((int)Math.Ceiling(marker.ActualWidth),(int)Math.Ceiling(marker.ActualHeight),96,96,PixelFormats.Pbgra32);markerBitmap.Render(visual);
+                var shapes=FlattenDrawings(VisualTreeHelper.GetDrawing(visual)).OfType<GeometryDrawing>().ToArray();
+                double tip=marker.ActualHeight-7;
+                if(shapes.Length!=2 || shapes.Any(shape=>shape.Geometry.Bounds.Top<tip-0.001) || Math.Abs(shapes.Single(shape=>shape.Geometry is StreamGeometry).Geometry.Bounds.Top-tip)>0.001) throw new Exception("Weekly reference arrow extends inside quota.");
+                SavePreview(Path.Combine(folder,"preset-"+i+(en ? "-en" : "-zh")+"-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
+            }
+        }
+        Theme.Colors=original;ApplyTheme();
+        File.WriteAllText(report,"PASS: four distinct green/blue/amber/light palettes; bilingual settings cards and custom color groups, preview/save/cancel behavior; text contrast >=4.5, icon/marker >=3; exact weekly timer decreases each minute independently of unchanged day-sized text and daily arrow; arrow tip on quota bottom and all marker geometry below quota at60/100/150% in both modes.\r\n"+string.Join("\r\n",notes)+"\r\nNo network queries or user preference writes. Physical mouse clicks and persisted-preference reload not exercised. Previous layout/refresh checks reused.\r\n");
     }
     static IEnumerable<Drawing> FlattenDrawings(Drawing drawing) {
         if(drawing==null) yield break;
@@ -1806,7 +2052,7 @@ class QuotaWidget
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check" || args[0]=="--colors-check" || args[0]=="--ticks-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -1815,9 +2061,11 @@ class QuotaWidget
                 window.Icon = decoder.Frames[0];
             }
             Control<Button>("RefreshButton").Click += (s, e) => Refresh(true);
-            if (!checking) { LoadLanguage(); LoadZoom(); LoadDisplayOptions(); LoadTheme(); LoadToolbarPreference(); }
+            if (!checking) { LoadLanguage(); LoadZoom(); LoadDisplayOptions(); LoadTheme(); LoadToolbarPreference(); LoadSettingsGuide(); }
             ConfigureInteraction();
             ApplyTheme();
+            if(args.Length==2 && args[0]=="--ticks-check") {CheckWeeklyTicks(args[1]);window.Close();return 0;}
+            if(args.Length==2 && args[0]=="--colors-check") {CheckColorSettings(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--aligned-check") {CheckAlignedLayout(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--display-check") {CheckDisplayRefresh(args[1]);window.Close();return 0;}
             if (args.Length == 2 && args[0] == "--reader-check") {
@@ -1858,7 +2106,7 @@ class QuotaWidget
             var clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
             clockTimer.Tick += (s, e) => Render();
             window.Closed += (s, e) => { scanTimer.Stop(); clockTimer.Stop(); };
-            window.Loaded += (s, e) => { Refresh(true); ShowWelcome(); if (!window.IsMouseOver) collapseTimer.Start(); };
+            window.Loaded += (s, e) => { Refresh(true); UpdateSettingsHint(); if (!window.IsMouseOver) collapseTimer.Start(); };
             Render(); scanTimer.Start(); clockTimer.Start();
             new Application().Run(window);
             return 0;
