@@ -27,6 +27,7 @@ public class SegmentedVisual : FrameworkElement
     public static readonly DependencyProperty DayMarkerProperty = DependencyProperty.Register("DayMarker", typeof(double), typeof(SegmentedVisual), new FrameworkPropertyMetadata(-1.0, FrameworkPropertyMetadataOptions.AffectsRender));
     public double DayMarker {get {return (double)GetValue(DayMarkerProperty);} set {SetValue(DayMarkerProperty,value);} }
     public static readonly DependencyProperty MarkerWidthProperty=DependencyProperty.RegisterAttached("MarkerWidth",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(2.0,FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty MarkerOutsideProperty=DependencyProperty.RegisterAttached("MarkerOutside",typeof(bool),typeof(SegmentedVisual),new FrameworkPropertyMetadata(false,FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty MarkerScaleProperty=DependencyProperty.RegisterAttached("MarkerScale",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(1.0,FrameworkPropertyMetadataOptions.AffectsRender));
     public string Caption { get { return (string)GetValue(CaptionProperty); } set { SetValue(CaptionProperty, value); } }
     public double Value { get { return (double)GetValue(ValueProperty); } set { SetValue(ValueProperty, value); } }
@@ -57,7 +58,7 @@ public class SegmentedVisual : FrameworkElement
             new Typeface(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), Kind.Contains("narrow") ? 11 : 13, Brushes.WhiteSmoke, VisualTreeHelper.GetDpi(this).PixelsPerDip) : null;
         double textLeft = caption == null ? -1 : Kind.Contains("right") ? width-caption.Width-6 : (width-caption.Width)/2;
         double textRight = caption == null ? -1 : (width+caption.Width)/2;
-        var bigMark = new Pen(Theme.Brush("ticks"),(detail ? 2 : 3.5)-(time || Kind.Contains("week") ? 0 : 0.5));
+        var bigMark = new Pen(Theme.Brush("ticks"),(detail ? 2 : 3.5)-(time || Kind.Contains("week") ? 0 : 0.5)-(time ? 0 : 0.75));
         for (int i = 1; i < boundaries.Length - 1; i++) {
             double x = width * boundaries[i] / 100;
             context.DrawLine(bigMark,new Point(x,fullTicks ? 0 : detail ? height*0.5 : height*0.75),new Point(x,height));
@@ -88,13 +89,14 @@ public class SegmentedVisual : FrameworkElement
     void DrawQuotaMarker(DrawingContext context,double width,double height) {
         if(DayMarker<0 || DayMarker>1 || width<=0 || height<=0) return;
         double scale=Math.Max(0.4,(double)GetValue(MarkerScaleProperty));
-        double half=Math.Min(Math.Max(5,3.5/scale),width/4), x=Math.Max(half+0.75/scale,Math.Min(width-half-0.75/scale,width*DayMarker));
+        double half=Math.Min(Math.Max(5,3.5/scale)*0.75,width/4), x=Math.Max(half+0.75/scale,Math.Min(width-half-0.75/scale,width*DayMarker));
         var color=Theme.Brush("weekMarker");
-        context.PushClip(new RectangleGeometry(new Rect(0,0,width,height)));
-        // Keep the daily reference at the quota top, inside the bar: no extra gap
-        // toward the hourly row. Draw it before captions so text remains readable.
-        // Its minimum physical size survives small zoom without extending upward.
-        double top=0.5/scale,tip=Math.Min(height-0.5/scale,top+Math.Max(5,4.5/scale));
+        bool outside=(bool)GetValue(MarkerOutsideProperty);
+        double markerHeight=Math.Max(5,4.5/scale)*0.75;
+        double top=outside ? -markerHeight : 0.5/scale;
+        double tip=outside ? 0 : Math.Min(height-0.5/scale,top+markerHeight);
+        // With text visible, the tip touches the top edge and the body stays above.
+        if(!outside) context.PushClip(new RectangleGeometry(new Rect(0,0,width,height)));
         var background=((SolidColorBrush)Theme.Brush("background")).Color;
         bool light=background.R*0.2126+background.G*0.7152+background.B*0.0722>160;
         var outline=new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#18212B" : "#E0F6FF"));
@@ -103,7 +105,7 @@ public class SegmentedVisual : FrameworkElement
             using(var path=geometry.Open()) {path.BeginFigure(new Point(x-half,top),true,true);path.LineTo(new Point(x+half,top),true,false);path.LineTo(new Point(x,tip),true,false);}
             context.DrawGeometry(color,new Pen(outline,1/scale) {LineJoin=PenLineJoin.Round},geometry);
         }
-        context.Pop();
+        if(!outside) context.Pop();
     }
 }
 
@@ -154,6 +156,7 @@ class QuotaWidget
             visual.SetBinding(SegmentedVisual.LabelProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.LabelProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.DayMarkerProperty, new Binding("DataContext") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.MarkerWidthProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerWidthProperty),RelativeSource=RelativeSource.TemplatedParent});
+            visual.SetBinding(SegmentedVisual.MarkerOutsideProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerOutsideProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.MarkerScaleProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerScaleProperty),RelativeSource=RelativeSource.TemplatedParent});
             bar.DataContext=-1.0;
             bar.Template = new ControlTemplate(typeof(ProgressBar)) { VisualTree = visual };
@@ -238,7 +241,7 @@ class QuotaWidget
         Render(); SaveZoom();
     }
     static void ApplyScaleLayout() {
-        bool mini = zoom < textThreshold;
+        bool mini = zoom <= textThreshold;
         bool narrowExpanded = false;
         bool compact = noExpand || !expanded || mini;
         foreach (string name in new[] { "SettingsButton", "LockButton", "RefreshButton", "CloseButton" }) {
@@ -289,7 +292,7 @@ class QuotaWidget
         }
         Control<ProgressBar>("WeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,2.0);
         Control<ProgressBar>("CompactWeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,Control<ProgressBar>("CompactWeekBar").Uid.Length==0 ? 2.0 : 3.5);
-        foreach(string name in new[]{"WeekBar","CompactWeekBar"}) Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerScaleProperty,zoom);
+        foreach(string name in new[]{"WeekBar","CompactWeekBar"}) {Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerScaleProperty,zoom);Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerOutsideProperty,!mini);}
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
@@ -1942,8 +1945,8 @@ class QuotaWidget
                 if(Control<TextBlock>("TitleLabel").Text!=(en ? "Usage" : "额度")) throw new Exception("Title rename failed.");
                 var root=Control<Border>("Root");root.Measure(new Size(window.Width,double.PositiveInfinity));
                 if(root.DesiredSize.Height>window.Height+1) throw new Exception("Display vertically clipped.");
-                if(scale<threshold && (Control<StackPanel>("Details").Visibility!=Visibility.Collapsed || Control<ProgressBar>("CompactWeekBar").Uid!="")) throw new Exception("Threshold not honored while locked.");
-                if(details && scale>=threshold && !DetailsFit()) {
+                if(scale<=threshold && (Control<StackPanel>("Details").Visibility!=Visibility.Collapsed || Control<ProgressBar>("CompactWeekBar").Uid!="")) throw new Exception("Threshold not honored while locked.");
+                if(details && scale>threshold && !DetailsFit()) {
                     var header=Control<Grid>("HeaderGrid");
                     if(header.Parent!=Control<Grid>("QuotaArea") || header.Visibility!=Visibility.Visible || Control<TextBlock>("TitleLabel").Visibility!=Visibility.Visible)
                         throw new Exception("Narrow expansion lost title/time.");
@@ -1961,10 +1964,10 @@ class QuotaWidget
                     double captionSize=width<=200 ? 11 : 13;
                     double captionStart=width<=200 ? width-18-6-TextWidth(bar.Uid,captionSize,FontWeights.Bold) : (width-18-TextWidth(bar.Uid,captionSize,FontWeights.Bold))/2;
                     if(label.Visibility==Visibility.Visible && captionStart < 6+TextWidth(label.Text,captionSize,FontWeights.Bold)+(width<=200 ? 8 : 6)) throw new Exception("Label/caption overlap.");
-                    if(scale>=threshold && bar.Uid.Length==0 && TextWidth("72%",13,FontWeights.Bold)<=width-30) throw new Exception("Percentage hidden despite fitting.");
+                    if(scale>threshold && bar.Uid.Length==0 && TextWidth("72%",13,FontWeights.Bold)<=width-30) throw new Exception("Percentage hidden despite fitting.");
                 }
-                if(scale>=threshold && width==100 && Control<ProgressBar>("CompactWeekBar").Uid!="72%") throw new Exception("Percentage-only fallback failed.");
-                if(scale>=threshold && (width==165 || width==180) && !Control<ProgressBar>("CompactWeekBar").Uid.Contains("·")) throw new Exception("Percent/time fallback failed.");
+                if(scale>threshold && width==100 && Control<ProgressBar>("CompactWeekBar").Uid!="72%") throw new Exception("Percentage-only fallback failed.");
+                if(scale>threshold && (width==165 || width==180) && !Control<ProgressBar>("CompactWeekBar").Uid.Contains("·")) throw new Exception("Percent/time fallback failed.");
                 foreach(string name in new[]{"WeekBar","CompactWeekBar","WeekTimeBar","CompactWeekTimeBar"}) {
                     var bar=Control<ProgressBar>(name);bar.ApplyTemplate();
                     var visual=Children(bar).OfType<SegmentedVisual>().Single();
@@ -1999,7 +2002,7 @@ class QuotaWidget
         foreach(bool en in new[]{false,true}) foreach(bool top in new[]{false,true}) foreach(double width in new[]{100.0,150.0,165.0,180.0,200.0,201.0,280.0,360.0,480.0}) foreach(double scale in new[]{0.4,0.8,1.0,1.5}) foreach(bool details in new[]{false,true}) {
             SelectLanguage(en);toolbarTop=top;baseWidth=width;expanded=details;textThreshold=0.8;SetZoom(scale);window.UpdateLayout();
             if(Math.Abs(window.Width-width*scale)>1) throw new Exception("Widget widened: actual="+window.Width+" expected="+(width*scale)+" base="+width+" zoom="+scale+" top="+top+" details="+details);
-            bool full=details && scale>=textThreshold;
+            bool full=details && scale>textThreshold;
             if((Control<StackPanel>("Details").Visibility==Visibility.Visible)!=full) throw new Exception("Expanded view fell back to compact.");
             if(Control<TextBlock>("Updated").Visibility!=Visibility.Collapsed || Control<TextBlock>("TopUpdated").Visibility!=Visibility.Collapsed) throw new Exception("Record time still visible.");
             for(int col=0;col<6;col++) if(Control<Grid>("HourInfo").ColumnDefinitions[col].Width!=Control<Grid>("WeekInfo").ColumnDefinitions[col].Width) throw new Exception("Detail columns misaligned.");
@@ -2031,7 +2034,7 @@ class QuotaWidget
                 var bar=Control<ProgressBar>("Compact"+prefix+"Bar");bar.ApplyTemplate();var visual=Children(bar).OfType<SegmentedVisual>().Single();
                 if(visual.Label!=(string)bar.GetValue(SegmentedVisual.LabelProperty)) throw new Exception("Inline label binding failed.");
                 if(Control<TextBlock>("Compact"+prefix+"Label").Visibility!=Visibility.Collapsed) throw new Exception("Old label control still visible.");
-                if(scale<textThreshold && visual.Label.Length>0) throw new Exception("Label ignores text threshold.");
+                if(scale<=textThreshold && visual.Label.Length>0) throw new Exception("Label ignores text threshold.");
             }
             var root=Control<Border>("Root");root.Measure(new Size(window.Width,double.PositiveInfinity));
             if(root.DesiredSize.Height>window.Height+1) throw new Exception("Vertical clipping.");
@@ -2095,7 +2098,7 @@ class QuotaWidget
             bool time=kind.StartsWith("time"),week=kind.Contains("week"),detail=kind.Contains("detail");
             int majorCount=time && week ? 6 : 4;
             if(lines.Length!=(!time ? 9 : majorCount)) throw new Exception("Tick count incorrect: "+kind);
-            double majorWidth=(detail ? 2 : 3.5)-(time || week ? 0 : 0.5);
+            double majorWidth=(detail ? 2 : 3.5)-(time || week ? 0 : 0.5)-(time ? 0 : 0.75);
             for(int i=0;i<lines.Length;i++) {
                 var line=(LineGeometry)lines[i].Geometry;bool minor=i>=majorCount;
                 double expectedX=minor ? (10+(i-majorCount)*20)*2 : (time && week ? (i+1)*200.0/7 : (i+1)*40);
@@ -2142,7 +2145,7 @@ class QuotaWidget
             Theme.Colors=palette;ApplyTheme();
             foreach(bool en in new[]{false,true}) foreach(double scale in new[]{0.6,1.0,1.5}) foreach(bool full in new[]{false,true}) {
                 SelectLanguage(en);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
-                var marker=Control<ProgressBar>(full && scale>=textThreshold ? "WeekBar" : "CompactWeekBar");marker.ApplyTemplate();
+                var marker=Control<ProgressBar>(full && scale>textThreshold ? "WeekBar" : "CompactWeekBar");marker.ApplyTemplate();
                 var visual=Children(marker).OfType<SegmentedVisual>().Single();
                 CheckQuotaArrow(visual,scale);
                 SavePreview(Path.Combine(folder,"preset-"+i+(en ? "-en" : "-zh")+"-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
@@ -2180,7 +2183,7 @@ class QuotaWidget
         window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();toolbarTop=false;settingsVisits=2;
         foreach(bool light in new[]{false,true}) foreach(bool en in new[]{false,true}) foreach(double width in new[]{100.0,280.0}) foreach(double scale in new[]{0.4,0.6,1.0,1.5}) foreach(bool full in new[]{false,true}) {
             Theme.Colors=Theme.Preset(light ? 3 : 0);baseWidth=width;SelectLanguage(en);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
-            var bar=Control<ProgressBar>(full && scale>=textThreshold ? "WeekBar" : "CompactWeekBar");bar.ApplyTemplate();var visual=Children(bar).OfType<SegmentedVisual>().Single();
+            var bar=Control<ProgressBar>(full && scale>textThreshold ? "WeekBar" : "CompactWeekBar");bar.ApplyTemplate();var visual=Children(bar).OfType<SegmentedVisual>().Single();
             foreach(double position in new[]{0.0,3.0/7,6.0/7}) {bar.DataContext=position;window.UpdateLayout();CheckQuotaArrow(visual,scale);}
             if(width==280 && !en) SavePreview(Path.Combine(Path.GetDirectoryName(report),(light ? "light" : "dark")+"-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
         }
