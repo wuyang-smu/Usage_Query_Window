@@ -27,6 +27,7 @@ public class SegmentedVisual : FrameworkElement
     public static readonly DependencyProperty DayMarkerProperty = DependencyProperty.Register("DayMarker", typeof(double), typeof(SegmentedVisual), new FrameworkPropertyMetadata(-1.0, FrameworkPropertyMetadataOptions.AffectsRender));
     public double DayMarker {get {return (double)GetValue(DayMarkerProperty);} set {SetValue(DayMarkerProperty,value);} }
     public static readonly DependencyProperty MarkerWidthProperty=DependencyProperty.RegisterAttached("MarkerWidth",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(2.0,FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty MarkerScaleProperty=DependencyProperty.RegisterAttached("MarkerScale",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(1.0,FrameworkPropertyMetadataOptions.AffectsRender));
     public string Caption { get { return (string)GetValue(CaptionProperty); } set { SetValue(CaptionProperty, value); } }
     public double Value { get { return (double)GetValue(ValueProperty); } set { SetValue(ValueProperty, value); } }
     public Brush Fill { get { return (Brush)GetValue(FillProperty); } set { SetValue(FillProperty, value); } }
@@ -38,7 +39,7 @@ public class SegmentedVisual : FrameworkElement
     }
     protected override void OnRender(DrawingContext context) {
         if(Kind=="marker-gap") return;
-        if(Kind=="week-marker-overlay") {DrawPairMarker(context,ActualWidth,ActualHeight);return;}
+        if(Kind=="week-marker-overlay") return;
         bool time = Kind.StartsWith("time"), labels = Kind.EndsWith("center");
         bool fullTicks = time || Kind.Contains("full");
         bool detail = Kind.Contains("detail");
@@ -71,6 +72,7 @@ public class SegmentedVisual : FrameworkElement
         context.Pop();
         var borderBrush = Theme.Brush("barBorder");
         context.DrawGeometry(null, new Pen(borderBrush,1.2) { LineJoin = PenLineJoin.Bevel }, Outline(width,height,slope,0.6));
+        if(!time && Kind.Contains("week")) DrawQuotaMarker(context,width,height);
         if (caption != null) {
             Point origin = new Point(textLeft,(height-caption.Height)/2);
             // Outline only the glyphs, keeping the bar visible behind and between characters.
@@ -83,19 +85,23 @@ public class SegmentedVisual : FrameworkElement
             }
         }
     }
-    void DrawPairMarker(DrawingContext context,double width,double height) {
+    void DrawQuotaMarker(DrawingContext context,double width,double height) {
         if(DayMarker<0 || DayMarker>1 || width<=0 || height<=0) return;
-        double half=Math.Min(3,width/4), x=Math.Max(half+0.8,Math.Min(width-half-0.8,width*DayMarker));
+        double scale=Math.Max(0.4,(double)GetValue(MarkerScaleProperty));
+        double half=Math.Min(Math.Max(5,3.5/scale),width/4), x=Math.Max(half+0.75/scale,Math.Min(width-half-0.75/scale,width*DayMarker));
         var color=Theme.Brush("weekMarker");
         context.PushClip(new RectangleGeometry(new Rect(0,0,width,height)));
-        // The quota ends seven pixels above the pair bottom (2px gap + 5px timer).
-        // Keep the entire reference marker below that edge so it never covers quota text.
-        double tip=height-7,triangleBottom=tip+3.3;
-        context.DrawLine(new Pen(color,(double)GetValue(MarkerWidthProperty)),new Point(x,triangleBottom),new Point(x,height-0.7));
+        // Keep the daily reference at the quota top, inside the bar: no extra gap
+        // toward the hourly row. Draw it before captions so text remains readable.
+        // Its minimum physical size survives small zoom without extending upward.
+        double top=0.5/scale,tip=Math.Min(height-0.5/scale,top+Math.Max(5,4.5/scale));
+        var background=((SolidColorBrush)Theme.Brush("background")).Color;
+        bool light=background.R*0.2126+background.G*0.7152+background.B*0.0722>160;
+        var outline=new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#18212B" : "#E0F6FF"));
         {
             var geometry=new StreamGeometry();
-            using(var path=geometry.Open()) {path.BeginFigure(new Point(x,tip),true,true);path.LineTo(new Point(x+half,triangleBottom),true,false);path.LineTo(new Point(x-half,triangleBottom),true,false);}
-            context.DrawGeometry(color,null,geometry);
+            using(var path=geometry.Open()) {path.BeginFigure(new Point(x-half,top),true,true);path.LineTo(new Point(x+half,top),true,false);path.LineTo(new Point(x,tip),true,false);}
+            context.DrawGeometry(color,new Pen(outline,1/scale) {LineJoin=PenLineJoin.Round},geometry);
         }
         context.Pop();
     }
@@ -148,6 +154,7 @@ class QuotaWidget
             visual.SetBinding(SegmentedVisual.LabelProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.LabelProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.DayMarkerProperty, new Binding("DataContext") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.MarkerWidthProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerWidthProperty),RelativeSource=RelativeSource.TemplatedParent});
+            visual.SetBinding(SegmentedVisual.MarkerScaleProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerScaleProperty),RelativeSource=RelativeSource.TemplatedParent});
             bar.DataContext=-1.0;
             bar.Template = new ControlTemplate(typeof(ProgressBar)) { VisualTree = visual };
         }
@@ -246,7 +253,9 @@ class QuotaWidget
         Grid.SetRow(Control<Grid>("QuotaArea"),toolbarTop ? 1 : 0);
         layout.RowDefinitions[toolbarTop ? 0 : 1].Height = new GridLength(showIcons ? (compact ? 16 : 20) : 0);
         layout.RowDefinitions[toolbarTop ? 1 : 0].Height = GridLength.Auto;
-        Control<Border>("Root").Padding = new Thickness(8,2/zoom,8,2/zoom);
+        // A wider warning outline consumes padding, not the bar's layout space.
+        double outlineExtra=Control<Border>("Root").BorderThickness.Left-1;
+        Control<Border>("Root").Padding = new Thickness(8-outlineExtra,2/zoom-outlineExtra,8-outlineExtra,2/zoom-outlineExtra);
         Control<Grid>("QuotaArea").Margin = new Thickness(0,toolbarTop && !compact ? 2/zoom : 0,0,0);
         Control<Grid>("Toolbar").Margin = new Thickness(0);
         for (int i=0;i<toolbarOrder.Length;i++) {
@@ -280,6 +289,7 @@ class QuotaWidget
         }
         Control<ProgressBar>("WeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,2.0);
         Control<ProgressBar>("CompactWeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,Control<ProgressBar>("CompactWeekBar").Uid.Length==0 ? 2.0 : 3.5);
+        foreach(string name in new[]{"WeekBar","CompactWeekBar"}) Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerScaleProperty,zoom);
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
@@ -431,43 +441,112 @@ class QuotaWidget
 <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static Slider.IncreaseLarge}' Focusable='False'><RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Height='4' Background='#46536B' CornerRadius='2'/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
 <Track.Thumb><Thumb Width='12' Height='12'><Thumb.Template><ControlTemplate TargetType='Thumb'><Border Background='#DCE8FA' CornerRadius='6'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
 </Track></Grid></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='TabItem'><Setter Property='Foreground' Value='#AAB3C2'/><Setter Property='Background' Value='#252D3B'/><Setter Property='Padding' Value='18,8'/><Setter Property='Margin' Value='0,0,6,0'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='TabItem'><Border x:Name='Tab' Background='{TemplateBinding Background}' BorderBrush='Transparent' BorderThickness='1' CornerRadius='5' Padding='{TemplateBinding Padding}'><ContentPresenter ContentSource='Header' HorizontalAlignment='Center'/></Border><ControlTemplate.Triggers><Trigger Property='IsSelected' Value='True'><Setter TargetName='Tab' Property='Background' Value='#426DA7'/><Setter Property='Foreground' Value='#FFFFFF'/></Trigger><Trigger Property='Tag' Value='guide'><Setter Property='Foreground' Value='#FFB580'/><Setter TargetName='Tab' Property='BorderBrush' Value='#FFB580'/></Trigger><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Tab' Property='BorderBrush' Value='#78BEFF'/><Setter TargetName='Tab' Property='BorderThickness' Value='1'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 </ResourceDictionary>");
     }
     static Brush PaletteBrush(Dictionary<string,string> palette,string key) {return new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette[key]));}
+    class ColorCard {public string Id,Name;public int Builtin=-1;public Dictionary<string,string> Colors;}
+    static List<ColorCard> customColorCards=new List<ColorCard>();
+    static string ColorCardsFile() {return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"color-cards.json");}
+    static List<ColorCard> AvailableColorCards() {
+        var cards=new List<ColorCard>();
+        for(int i=0;i<4;i++) cards.Add(new ColorCard {Id="builtin-"+i,Builtin=i,Colors=Theme.Preset(i)});
+        cards.AddRange(customColorCards);return cards;
+    }
+    static string ColorCardName(ColorCard card) {return card.Builtin>=0 ? Theme.PresetName(card.Builtin,english) : card.Name;}
+    static bool ColorCardNameExists(string name) {
+        return AvailableColorCards().Any(card=>card.Builtin>=0
+            ? string.Equals(Theme.PresetName(card.Builtin,false),name,StringComparison.OrdinalIgnoreCase) || string.Equals(Theme.PresetName(card.Builtin,true),name,StringComparison.OrdinalIgnoreCase)
+            : string.Equals(card.Name,name,StringComparison.OrdinalIgnoreCase));
+    }
+    static void LoadColorCards() {
+        if(checking) return;
+        try {
+            if(!File.Exists(ColorCardsFile())) {customColorCards.Clear();return;}
+            var saved=new JavaScriptSerializer().Deserialize<List<ColorCard>>(File.ReadAllText(ColorCardsFile()));
+            var valid=new List<ColorCard>();
+            foreach(var card in saved ?? new List<ColorCard>()) {
+                if(card==null || string.IsNullOrWhiteSpace(card.Name) || card.Colors==null || card.Name.Length>48) continue;
+                if(card.Colors.Any(pair=>Theme.Keys.Contains(pair.Key) && !Theme.Valid(pair.Value))) continue;
+                var colors=Theme.Defaults();foreach(string key in Theme.Keys) if(card.Colors.ContainsKey(key)) colors[key]=card.Colors[key];
+                card.Builtin=-1;card.Colors=colors;valid.Add(card);
+            }
+            customColorCards=valid;
+        } catch(IOException) {} catch(UnauthorizedAccessException) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
+    }
+    static void AddColorCard(string name,Dictionary<string,string> colors) {
+        name=(name ?? "").Trim();
+        if(name.Length==0 || name.Length>48) throw new ArgumentException(Text("名称需要 1–48 个字符。","Use a name between 1 and 48 characters."));
+        if(ColorCardNameExists(name)) throw new ArgumentException(Text("名称已存在，请使用其他名称。","That name already exists. Choose another."));
+        if(Theme.Keys.Any(key=>!colors.ContainsKey(key) || !Theme.Valid(colors[key]))) throw new ArgumentException(Text("请先修正无效颜色。","Correct invalid colors first."));
+        var next=new List<ColorCard>(customColorCards);next.Add(new ColorCard {Id=Guid.NewGuid().ToString("N"),Name=name,Colors=new Dictionary<string,string>(colors)});
+        if(!checking) {
+            string path=ColorCardsFile(),temporary=path+".tmp";Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(temporary,new JavaScriptSerializer().Serialize(next));
+            if(File.Exists(path)) File.Replace(temporary,path,null);else File.Move(temporary,path);
+        }
+        customColorCards=next;
+    }
+    static bool ApplyColorCard(ColorCard card) {
+        var previous=new Dictionary<string,string>(Theme.Colors);
+        try {Theme.Colors=new Dictionary<string,string>(card.Colors);SaveColors(previous,true);ApplyTheme();return true;}
+        catch(Exception ex) {Theme.Colors=previous;ApplyTheme();if(checking) throw;MessageBox.Show(settingsWindow ?? window,Text("配色无法保存：","Could not save colors: ")+ex.Message);return false;}
+    }
+    static void EnableCardDragging(ScrollViewer viewer) {
+        Point origin=new Point();double offset=0;bool pressed=false,dragged=false;
+        Action snap=()=>viewer.ScrollToVerticalOffset(Math.Round(viewer.VerticalOffset/98)*98);
+        viewer.PreviewMouseLeftButtonDown+=(s,e)=>{
+            var current=e.OriginalSource as DependencyObject;
+            while(current!=null) {if(current is System.Windows.Controls.Primitives.ScrollBar){pressed=false;return;}current=current is Visual ? VisualTreeHelper.GetParent(current) : null;}
+            origin=e.GetPosition(viewer);offset=viewer.VerticalOffset;pressed=true;dragged=false;
+        };
+        viewer.PreviewMouseMove+=(s,e)=>{
+            if(!pressed || e.LeftButton!=System.Windows.Input.MouseButtonState.Pressed) return;
+            double delta=e.GetPosition(viewer).Y-origin.Y;
+            if(!dragged && Math.Abs(delta)>=6) {dragged=true;viewer.CaptureMouse();}
+            if(dragged) {viewer.ScrollToVerticalOffset(offset-delta);e.Handled=true;}
+        };
+        // Only take capture after a drag starts: normal clicks still select cards,
+        // while taking capture cancels the button's pending click during a drag.
+        viewer.PreviewMouseLeftButtonUp+=(s,e)=>{if(dragged){e.Handled=true;snap();viewer.ReleaseMouseCapture();}pressed=dragged=false;};
+        viewer.LostMouseCapture+=(s,e)=>{if(e.OriginalSource==viewer){pressed=dragged=false;}};
+        viewer.PreviewMouseWheel+=(s,e)=>{viewer.ScrollToVerticalOffset(viewer.VerticalOffset-(e.Delta>0 ? 196 : -196));e.Handled=true;};
+    }
     static Grid CreatePresetCards(Action<int> select,out Button[] buttons) {
-        var grid=new Grid {Margin=new Thickness(0,0,0,8)};
+        var cards=AvailableColorCards();var grid=new Grid();
         var template=(ControlTemplate)XamlReader.Parse("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'><Border x:Name='Card' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='1.5' CornerRadius='6'><ContentPresenter HorizontalAlignment='Stretch' VerticalAlignment='Stretch'/></Border><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Card' Property='BorderBrush' Value='#AECFFF'/></Trigger></ControlTemplate.Triggers></ControlTemplate>");
-        for(int i=0;i<2;i++) {grid.ColumnDefinitions.Add(new ColumnDefinition());grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});}
-        buttons=new Button[4];
-        for(int i=0;i<4;i++) {
-            int index=i;var palette=Theme.Preset(i);
+        for(int i=0;i<2;i++) grid.ColumnDefinitions.Add(new ColumnDefinition());
+        for(int i=0;i<(cards.Count+1)/2;i++) grid.RowDefinitions.Add(new RowDefinition {Height=new GridLength(98)});
+        buttons=new Button[cards.Count];
+        for(int i=0;i<cards.Count;i++) {
+            int index=i;var card=cards[i];var palette=card.Colors;
             var content=new StackPanel();
-            content.Children.Add(new TextBlock {Text=Theme.PresetName(i,english),Tag="PresetName",Foreground=PaletteBrush(palette,"title"),FontSize=12,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,8),TextWrapping=TextWrapping.NoWrap});
+            content.Children.Add(new TextBlock {Text=ColorCardName(card),Tag="PresetName",Foreground=PaletteBrush(palette,"title"),FontSize=12,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,8),TextWrapping=TextWrapping.NoWrap,TextTrimming=TextTrimming.CharacterEllipsis});
             var bar=new Grid {Height=20,Background=PaletteBrush(palette,"track"),ClipToBounds=true};
             bar.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(7,GridUnitType.Star)});bar.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(3,GridUnitType.Star)});
             bar.Children.Add(new Border {Background=PaletteBrush(palette,"quotaGreen")});
             var caption=new TextBlock {Text="72% · 6d",Foreground=PaletteBrush(palette,"caption"),FontSize=11,FontWeight=FontWeights.Bold,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
             Grid.SetColumnSpan(caption,2);bar.Children.Add(caption);
-            var arrow=new System.Windows.Shapes.Path {Data=Geometry.Parse("M 0,5 L 3.5,0 L 7,5 Z"),Fill=PaletteBrush(palette,"weekMarker"),Width=7,Height=5,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,14,0)};
+            var arrow=new System.Windows.Shapes.Path {Data=Geometry.Parse("M 0,0 L 8,0 L 4,5 Z"),Fill=PaletteBrush(palette,"weekMarker"),Stroke=PaletteBrush(palette,"caption"),StrokeThickness=0.7,Width=9,Height=6,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,0,14,0)};
             Grid.SetColumnSpan(arrow,2);bar.Children.Add(arrow);
             content.Children.Add(new Border {Child=bar,BorderBrush=PaletteBrush(palette,"barBorder"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(3)});
             var swatches=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,7,0,0)};
             foreach(string key in new[]{"quotaYellow","quotaOrange","quotaRed","weekMarker"}) swatches.Children.Add(new Border {Width=22,Height=4,Background=PaletteBrush(palette,key),CornerRadius=new CornerRadius(2),Margin=new Thickness(0,0,4,0)});
             content.Children.Add(swatches);
-            var button=new Button {Padding=new Thickness(0),Margin=new Thickness(i%2==0 ? 0 : 4,0,i%2==0 ? 4 : 0,8),HorizontalContentAlignment=HorizontalAlignment.Stretch,Tag=i,
+            var button=new Button {Padding=new Thickness(0),Margin=new Thickness(i%2==0 ? 0 : 4,0,i%2==0 ? 4 : 0,8),HorizontalContentAlignment=HorizontalAlignment.Stretch,Tag=card,
                 Template=template,Content=new Border {Background=PaletteBrush(palette,"background"),Padding=new Thickness(10),CornerRadius=new CornerRadius(5),Child=content}};
-            button.ToolTip=Text("点击预览，保存后生效","Click to preview; save to keep");button.Click+=(s,e)=>select(index);
+            button.ToolTip=Text("点击应用并保存","Click to apply and save");button.Click+=(s,e)=>select(index);
             Grid.SetColumn(button,i%2);Grid.SetRow(button,i/2);grid.Children.Add(button);buttons[i]=button;
         }
         return grid;
     }
     static void UpdatePresetCards(Button[] cards) {
         for(int i=0;i<cards.Length;i++) {
-            var palette=Theme.Preset(i);bool selected=Theme.Keys.All(key=>string.Equals(Theme.Colors[key],palette[key],StringComparison.OrdinalIgnoreCase));
+            var card=(ColorCard)cards[i].Tag;var palette=card.Colors;bool selected=Theme.Keys.All(key=>string.Equals(Theme.Colors[key],palette[key],StringComparison.OrdinalIgnoreCase));
             cards[i].BorderBrush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected ? "#78BEFF" : "#46536B"));
             var content=(StackPanel)((Border)cards[i].Content).Child;
-            ((TextBlock)content.Children[0]).Text=Theme.PresetName(i,english)+(selected ? " ✓" : "");
-            cards[i].ToolTip=Text("点击预览，保存后生效","Click to preview; save to keep");
+            ((TextBlock)content.Children[0]).Text=ColorCardName(card)+(selected ? " ✓" : "");
+            cards[i].ToolTip=ColorCardName(card)+"\n"+Text("点击应用并保存","Click to apply and save");
         }
     }
     static void SaveColors(Dictionary<string,string> previous,bool preservePrevious) {
@@ -479,14 +558,14 @@ class QuotaWidget
     static void OpenSettings() {
         if (settingsOpen) return;
         settingsOpen = true; collapseTimer.Stop(); bool guide=BeginSettingsVisit();
-        var dialog = new Window { Width = 410, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
+        var dialog = new Window { Width = 410, Height=590, SizeToContent=SizeToContent.Manual, ResizeMode = ResizeMode.NoResize,
             Owner = checking ? null : window, WindowStartupLocation = WindowStartupLocation.CenterOwner, Topmost = true,
             Background = new SolidColorBrush(Color.FromRgb(32,36,44)), Foreground = Brushes.WhiteSmoke,
             FontFamily = new FontFamily("Microsoft YaHei UI"), FontSize = 12, ShowInTaskbar = false };
         settingsWindow = dialog;
         dialog.Resources=SettingsStyles();
         var panel = new StackPanel { Margin = new Thickness(18) };
-        dialog.Content = new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+        dialog.Content=panel;
         var languageLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(languageLabel);
         var language = new ComboBox { SelectedIndex = english ? 1 : 0, Margin = new Thickness(0,0,0,16) };
         language.Items.Add("中文"); language.Items.Add("English"); panel.Children.Add(language);
@@ -502,21 +581,18 @@ class QuotaWidget
         var widthLabel=new TextBlock();
         var commitWidth=AddNumberSetting(panel,widthLabel,100,480,baseWidth,"px",value=>{baseWidth=value;Render();SaveDisplayOptions();});
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
-        var savedColors=new Dictionary<string,string>(Theme.Colors);bool colorPending=false;
-        Button[] presetCards=null;
+        LoadColorCards();
+        Button[] presetCards=null;Grid presetGrid=null;
         var colorNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=Brushes.LightSlateGray};
-        var saveColors=new Button {Padding=new Thickness(10,5,10,5),Margin=new Thickness(0,0,8,0),IsEnabled=false};
-        var cancelColors=new Button {Padding=new Thickness(10,5,10,5),IsEnabled=false};
-        var colorActions=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,10)};colorActions.Children.Add(saveColors);colorActions.Children.Add(cancelColors);
-        Action syncColors=()=>{UpdatePresetCards(presetCards);saveColors.IsEnabled=cancelColors.IsEnabled=colorPending;};
-        var presetGrid=CreatePresetCards(index=>{Theme.Colors=Theme.Preset(index);colorPending=true;ApplyTheme();syncColors();},out presetCards);
-        Action discardColors=()=>{Theme.Colors=new Dictionary<string,string>(savedColors);colorPending=false;ApplyTheme();syncColors();};
-        cancelColors.Click+=(s,e)=>discardColors();
-        saveColors.Click+=(s,e)=>{
-            try {SaveColors(savedColors,true);savedColors=new Dictionary<string,string>(Theme.Colors);colorPending=false;syncColors();}
-            catch(Exception ex) {MessageBox.Show(dialog,Text("配色无法保存：","Could not save colors: ")+ex.Message);}
+        var cardViewport=new ScrollViewer {Height=196,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,CanContentScroll=false,PanningMode=PanningMode.VerticalOnly,Margin=new Thickness(0,0,0,10)};
+        EnableCardDragging(cardViewport);
+        Action syncColors=()=>UpdatePresetCards(presetCards);
+        Action reloadCards=()=>{
+            double previousOffset=cardViewport.VerticalOffset;
+            presetGrid=CreatePresetCards(index=>{ApplyColorCard((ColorCard)presetCards[index].Tag);syncColors();},out presetCards);
+            cardViewport.Content=presetGrid;syncColors();cardViewport.ScrollToVerticalOffset(previousOffset);
         };
-        dialog.Closed+=(s,e)=>{if(colorPending) discardColors();};
+        reloadCards();
         var toolbarOption = new CheckBox { IsChecked = pinIcons, Foreground = Brushes.WhiteSmoke, Margin = new Thickness(0,0,0,16) }; panel.Children.Add(toolbarOption);
         var placementLabel = new TextBlock { Margin = new Thickness(0,0,0,6) }; panel.Children.Add(placementLabel);
         var placement = new ComboBox { Margin = new Thickness(0,0,0,12) };
@@ -547,28 +623,47 @@ class QuotaWidget
         var toolbarElements=panel.Children.Cast<UIElement>().SkipWhile(element=>element!=toolbarOption).TakeWhile(element=>element!=actions).ToArray();
         panel.Children.Clear();
         var settingsHeading=new TextBlock {FontSize=20,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,16)};panel.Children.Add(settingsHeading);
+        var generalPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};var toolbarPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};var colorPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};
+        var pages=new TabControl {Background=dialog.Background,BorderThickness=new Thickness(0)};
+        var generalPage=new TabItem {Content=new ScrollViewer {Content=generalPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
+        var toolbarPage=new TabItem {Content=new ScrollViewer {Content=toolbarPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
+        var colorPage=new TabItem {Content=new ScrollViewer {Content=colorPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
+        pages.Items.Add(generalPage);pages.Items.Add(toolbarPage);pages.Items.Add(colorPage);pages.SelectedIndex=0;panel.Children.Add(pages);
+        language.Margin=new Thickness(0);scaleRow.Margin=new Thickness(0,0,0,8);note.Margin=new Thickness(0,4,0,8);
+        ((Grid)thresholdLabel.Tag).Margin=new Thickness(0,0,0,8);((Grid)widthLabel.Tag).Margin=new Thickness(0);
+        StackPanel groupTarget=generalPanel;
         Action<TextBlock,UIElement[]> group=(heading,elements)=>{
-            heading.Foreground=new SolidColorBrush(Color.FromRgb(145,167,199));heading.FontWeight=FontWeights.Bold;heading.Margin=new Thickness(0,0,0,8);panel.Children.Add(heading);
-            var content=new StackPanel {Margin=new Thickness(14)};
+            heading.Foreground=new SolidColorBrush(Color.FromRgb(145,167,199));heading.FontWeight=FontWeights.Bold;heading.Margin=new Thickness(0,0,0,6);groupTarget.Children.Add(heading);
+            var content=new StackPanel {Margin=new Thickness(10)};
             foreach(var element in elements) content.Children.Add(element);
-            panel.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,16),Child=content});
+            groupTarget.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,12),Child=content});
         };
         group(languageHeading,new UIElement[]{languageLabel,language});
         group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag});
-        group(toolbarHeading,toolbarElements);
-        group(appearanceHeading,new UIElement[]{presetGrid,colorNote,colorActions,colors});panel.Children.Add(actions);
+        groupTarget=toolbarPanel;group(toolbarHeading,toolbarElements);
+        groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,colors});panel.Children.Add(actions);
+        // Let the current page shrink within the screen instead of creating one
+        // long settings document. Each page owns its own overflow scrolling.
+        var settingsRoot=new DockPanel {Margin=new Thickness(18)};
+        panel.Children.Remove(settingsHeading);panel.Children.Remove(pages);panel.Children.Remove(actions);
+        DockPanel.SetDock(settingsHeading,Dock.Top);DockPanel.SetDock(actions,Dock.Bottom);
+        settingsRoot.Children.Add(settingsHeading);settingsRoot.Children.Add(actions);settingsRoot.Children.Add(pages);dialog.Content=settingsRoot;
         foreach(var item in new TextBlock[]{languageLabel,note,placementLabel}) if(guide) item.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) toolbarOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
+        if(guide) {
+            foreach(var page in new[]{generalPage,toolbarPage,colorPage}) page.Tag="guide";
+            colors.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));colors.BorderBrush=colors.Foreground;
+        }
         Action labels = () => {
             dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言（Language）", "Language");
             settingsHeading.Text=dialog.Title;languageHeading.Text=Text("语言（Language）","Language");sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("配色","Colors");toolbarHeading.Text=Text("工具栏","Toolbar");
             scaleLabel.Text = Text("缩放比例", "Scale");
-            note.Text = Text("滚轮缩放：鼠标放在悬浮窗上，滚动滚轮调整大小。低于 60% 时建议只看条形。修改自动保存。", "Mouse wheel: point at the widget and scroll to resize. Below 60%, bars are recommended. Changes save automatically.");
+            note.Text = Text("鼠标置于悬浮窗上，用滚轮缩放。低于 60% 时建议仅查看条形。", "Point at the widget and scroll to resize. Below 60%, bars are recommended.");
             thresholdLabel.Text=Text("文字隐藏阈值", "Hide text below");
             widthLabel.Text=Text("窗口宽度（100% 缩放时）", "Window width (at 100% scale)");
             colors.Content = Text("自定义配色…", "Custom colors…"); done.Content = Text("完成", "Done");
-            colorNote.Text=Text("点击色卡预览。配色需保存；取消或关闭设置会恢复原配色。其他选项自动保存。","Click a card to preview. Save colors to keep; cancel or close settings to revert. Other options save automatically.");
-            saveColors.Content=Text("保存配色","Save colors");cancelColors.Content=Text("取消预览","Cancel preview");syncColors();
+            generalPage.Header=Text("常规","General");toolbarPage.Header=Text("工具栏","Toolbar");colorPage.Header=Text("配色","Colors");
+            colorNote.Text=Text("点击色卡立即应用并保存。上下拖动、滚轮或滚动条查看其余色卡。自定义颜色可另存为新色卡。","Click a card to apply and save. Drag vertically, scroll or use the scrollbar to see more. Save custom colors as a new card.");syncColors();
             toolbarOption.Content = Text("收起时保留工具栏", "Keep toolbar when collapsed");
             toolbarOption.ToolTip=Text("关闭后，只有展开窗口时才显示工具栏。","When disabled, the toolbar appears only while expanded.");
             placementLabel.ToolTip=Text("上方工具栏向下展开，下方工具栏向上展开。","Top toolbar expands downward; bottom toolbar expands upward.");
@@ -607,27 +702,21 @@ class QuotaWidget
         };
         input.LostKeyboardFocus += (s,e) => commit();
         input.KeyDown += (s,e) => { if (e.Key == System.Windows.Input.Key.Enter) { commit(); e.Handled = true; } };
-        colors.Click += (s,e) => {
-            if(OpenAppearance(colorPending ? savedColors : null)) {savedColors=new Dictionary<string,string>(Theme.Colors);colorPending=false;}
-            syncColors();
-        };
+        colors.Click += (s,e) => {OpenAppearance();reloadCards();};
         done.Click += (s,e) => { commit(); commitThreshold(); commitWidth(); dialog.Close(); };
         try {
             if (checking) {
-                var initialColors=new Dictionary<string,string>(savedColors);
+                var initialColors=new Dictionary<string,string>(Theme.Colors);
                 for(int i=0;i<4;i++) {
                     presetCards[i].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    if(!colorPending || !saveColors.IsEnabled || Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(i)[key])) throw new Exception("Settings preset card failed.");
+                    if(Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(i)[key])) throw new Exception("Immediate card selection failed.");
                 }
-                cancelColors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                if(colorPending || saveColors.IsEnabled || Theme.Keys.Any(key=>Theme.Colors[key]!=initialColors[key])) throw new Exception("Preset cancel rollback failed.");
-                presetCards[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));saveColors.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                presetCards[1].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));discardColors();
-                if(colorPending || Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(0)[key])) throw new Exception("Saved palette not retained after later rollback.");
-                savedColors=initialColors;discardColors();
-                if(panel.Children.OfType<Border>().Count()!=4 || languageHeading.Text!=Text("语言（Language）","Language") || languageLabel.Text!=Text("语言（Language）","Language")) throw new Exception("Settings grouping / bilingual language title failed.");
+                Theme.Colors=initialColors;ApplyTheme();syncColors();
+                if(pages.Items.Count!=3 || generalPanel.Children.OfType<Border>().Count()!=2 || toolbarPanel.Children.OfType<Border>().Count()!=1 || colorPanel.Children.OfType<Border>().Count()!=1 || cardViewport.Height!=196
+                    || languageLabel.Text!=Text("语言（Language）","Language")) throw new Exception("Settings pages / card viewport failed.");
                 bool guidanceShown=note.Foreground.ToString()=="#FFFFB580";
                 if(guidanceShown!=guide || ((SolidColorBrush)toolbarOption.Foreground).Color!=((SolidColorBrush)(guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke)).Color) throw new Exception("Settings guide visibility failed.");
+                if(new[]{generalPage,toolbarPage,colorPage}.Any(page=>((string)page.Tag=="guide")!=guide) || (colors.Foreground.ToString()=="#FFFFB580")!=guide) throw new Exception("Three-page guide / custom-color emphasis failed.");
                 double before = zoom; bool wasEnglish = english;
                 bool beforeTop=toolbarTop;var beforeOrder=(string[])toolbarOrder.Clone();
                 double oldThreshold=textThreshold,oldWidth=baseWidth;
@@ -667,20 +756,17 @@ class QuotaWidget
                 toolbarTop=beforeTop;toolbarOrder=beforeOrder;syncOrder();
                 SetZoom(before);
                 slider.Value=before*100;input.Text=(before*100).ToString("0",CultureInfo.InvariantCulture);
-                panel.Measure(new Size(dialog.Width-36,double.PositiveInfinity)); panel.Arrange(new Rect(panel.DesiredSize)); panel.UpdateLayout();
-                var bitmap = new RenderTargetBitmap((int)dialog.Width,(int)Math.Ceiling(panel.DesiredSize.Height+36),96,96,PixelFormats.Pbgra32);
-                var drawing = new DrawingVisual(); using (var context = drawing.RenderOpen()) { context.DrawRectangle(dialog.Background,null,new Rect(0,0,bitmap.PixelWidth,bitmap.PixelHeight)); context.PushTransform(new TranslateTransform(18,18)); context.DrawRectangle(new VisualBrush(panel),null,new Rect(panel.RenderSize)); }
-                bitmap.Render(drawing); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                using (var stream = File.Create(settingsPreviewPath)) encoder.Save(stream);
+                settingsRoot.Measure(new Size(dialog.Width,dialog.Height-32));settingsRoot.Arrange(new Rect(0,0,dialog.Width,dialog.Height-32));settingsRoot.UpdateLayout();
+                var bitmap=new RenderTargetBitmap((int)dialog.Width,(int)dialog.Height-32,96,96,PixelFormats.Pbgra32);bitmap.Render(settingsRoot);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var stream=File.Create(settingsPreviewPath))encoder.Save(stream);
                 SavePanelPreview(presetGrid,dialog.Background,338,Path.Combine(Path.GetDirectoryName(settingsPreviewPath),english ? "preset-cards-en.png" : "preset-cards-zh.png"));
             } else {
                 dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-                panel.Measure(new Size(dialog.Width,double.PositiveInfinity));
-                PositionSettings(dialog,panel.DesiredSize.Height+SystemParameters.WindowCaptionHeight+2*SystemParameters.FixedFrameHorizontalBorderHeight);
+                PositionSettings(dialog,dialog.Height);
                 dialog.ContentRendered += (s,e) => PositionSettings(dialog);
                 dialog.ShowDialog();
             }
-        } finally { if(colorPending) discardColors();settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
+        } finally { settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
     }
     static string settingsPreviewPath;
     static void CheckToolbarLayout(string report) {
@@ -969,6 +1055,24 @@ class QuotaWidget
         UpdateSettingsHint();
         Render();
     }
+    static string PromptColorCardName(Window owner) {
+        var dialog=new Window {Owner=owner,Title=Text("保存为色卡","Save as color card"),Width=320,SizeToContent=SizeToContent.Height,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,ShowInTaskbar=false,Background=owner.Background,Foreground=Brushes.WhiteSmoke,FontFamily=new FontFamily("Microsoft YaHei UI"),FontSize=12,Resources=SettingsStyles()};
+        var body=new StackPanel {Margin=new Thickness(16)};dialog.Content=body;
+        body.Children.Add(new TextBlock {Text=Text("色卡名称","Card name"),Margin=new Thickness(0,0,0,8)});
+        var input=new TextBox {MaxLength=48,Padding=new Thickness(8,6,8,6)};body.Children.Add(input);
+        var error=new TextBlock {Foreground=Brushes.LightSalmon,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,8)};body.Children.Add(error);
+        var actions=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};body.Children.Add(actions);
+        var cancel=new Button {Content=Text("取消","Cancel"),IsCancel=true,Padding=new Thickness(10,5,10,5),Margin=new Thickness(0,0,8,0)};
+        var save=new Button {Content=Text("保存","Save"),IsDefault=true,Padding=new Thickness(10,5,10,5)};actions.Children.Add(cancel);actions.Children.Add(save);
+        string result=null;cancel.Click+=(s,e)=>dialog.Close();
+        save.Click+=(s,e)=>{
+            string name=input.Text.Trim();
+            if(name.Length==0){error.Text=Text("请输入名称。","Enter a name.");return;}
+            if(ColorCardNameExists(name)){error.Text=Text("名称已存在，请换一个名称。","That name already exists. Choose another.");return;}
+            result=name;dialog.Close();
+        };
+        dialog.ContentRendered+=(s,e)=>input.Focus();dialog.ShowDialog();return result;
+    }
     static bool OpenAppearance(Dictionary<string,string> presetBackup=null) {
         if (appearanceOpen) return false;
         appearanceOpen = true; collapseTimer.Stop(); SetExpanded(true);
@@ -995,7 +1099,8 @@ class QuotaWidget
         var reset = new Button { Content = Text("恢复默认", "Defaults"), Padding = new Thickness(10,5,10,5), Margin = new Thickness(0,0,8,0) };
         var cancel = new Button { Content = Text("取消", "Cancel"), IsCancel = true, Padding = new Thickness(10,5,10,5), Margin = new Thickness(0,0,8,0) };
         var save = new Button { Content = Text("保存", "Save"), IsDefault = true, Padding = new Thickness(10,5,10,5) };
-        actions.Children.Add(reset); actions.Children.Add(cancel); actions.Children.Add(save);
+        var saveAsCard=new Button {Content=Text("另存为色卡…","Save as card…"),Padding=new Thickness(10,5,10,5),Margin=new Thickness(0,0,8,0)};
+        actions.Children.Add(reset); actions.Children.Add(cancel);actions.Children.Add(saveAsCard); actions.Children.Add(save);
         var list = new StackPanel(); panel.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var editors = new Dictionary<string,TextBox>();
         string[][] groups={new[]{"quotaGreen","quotaYellow","quotaOrange","quotaRed"},new[]{"timeGreen","timeYellow","timeOrange","timeRed"},new[]{"title","label","valueText","timeText","caption"},new[]{"background","windowBorder","barBorder","track"},new[]{"ticks","weekMarker","icons","status","alert","failure"}};
@@ -1011,7 +1116,7 @@ class QuotaWidget
             var edit = new TextBox { Text = Theme.Colors[key], Padding = new Thickness(5), VerticalContentAlignment = VerticalAlignment.Center }; Grid.SetColumn(edit,2); row.Children.Add(edit); editors[key] = edit;
             edit.TextChanged += (s,e) => {
                 bool valid = Theme.Valid(edit.Text); edit.BorderBrush = valid ? Brushes.Gray : Brushes.OrangeRed;
-                save.IsEnabled = editors.Values.All(t => Theme.Valid(t.Text));
+                save.IsEnabled=saveAsCard.IsEnabled=editors.Values.All(t => Theme.Valid(t.Text));
                 if (valid) { Theme.Colors[key] = edit.Text.ToUpperInvariant(); swatch.Background = Theme.Brush(key); ApplyTheme(); }
             };
             swatch.Click += (s,e) => {
@@ -1049,6 +1154,13 @@ class QuotaWidget
                 }
                 accepted = true; dialog.Close();
             } catch (Exception ex) { MessageBox.Show(dialog,Text("颜色设置无法保存：", "Could not save colors: ") + ex.Message); }
+        };
+        saveAsCard.Click+=(s,e)=>{
+            string name=PromptColorCardName(dialog);if(name==null) return;
+            try {AddColorCard(name,Theme.Colors);}
+            catch(Exception ex){MessageBox.Show(dialog,Text("色卡无法保存：","Could not save color card: ")+ex.Message);return;}
+            try {SaveColors(presetBackup ?? original,presetApplied);accepted=true;dialog.Close();}
+            catch(Exception ex){MessageBox.Show(dialog,Text("色卡已保存，但当前配色未能保存。可再次点击保存：","Card saved, but active colors could not be saved. You can try Save again: ")+ex.Message);}
         };
         try {
             if (checking) {
@@ -1556,6 +1668,7 @@ class QuotaWidget
         Control<TextBlock>("Updated").Foreground = Theme.Brush(warning ? "alert" : "status");
         // Keep the warning visible even when zoom hides captions and the toolbar.
         Control<Border>("Root").BorderBrush = Theme.Brush(warning ? "alert" : "windowBorder");
+        Control<Border>("Root").BorderThickness = new Thickness(warning ? 1+1/zoom : 1);
         Control<Border>("Root").ToolTip = warning ? Text("额度可能不是最新值，请点击刷新核对。", "Usage may be outdated. Click refresh to verify.") + "\n" + localReadWarning : null;
         if (reading) { Control<TextBlock>("Updated").Text = Text("正在读取额度…", "Reading usage…"); ResizeWidget(); return; }
         if (snapshot == null) {
@@ -1922,13 +2035,7 @@ class QuotaWidget
         var marker=Control<ProgressBar>("WeekMarker");marker.ApplyTemplate();
         var markerVisual=Children(marker).OfType<SegmentedVisual>().Single();
         if(markerVisual.Kind!="week-marker-overlay" || Math.Abs(markerVisual.DayMarker-5.0/7)>0.001) throw new Exception("Single weekly overlay binding failed.");
-        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(marker.ActualWidth),(int)Math.Ceiling(marker.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(markerVisual);
-        int stride=bitmap.PixelWidth*4;var pixels=new byte[stride*bitmap.PixelHeight];bitmap.CopyPixels(pixels,stride,0);
-        int center=(int)Math.Round(marker.ActualWidth*5/7),start=bitmap.PixelHeight-6;
-        for(int y=start;y<bitmap.PixelHeight-1;y++) {
-            bool blue=false;for(int x=Math.Max(0,center-2);x<=Math.Min(bitmap.PixelWidth-1,center+2);x++){int offset=y*stride+x*4;if(pixels[offset+3]>60 && pixels[offset]>pixels[offset+2] && pixels[offset+1]>pixels[offset+2]) blue=true;}
-            if(!blue) throw new Exception("Marker line has a gap at row "+y);
-        }
+        Control<ProgressBar>("WeekBar").ApplyTemplate();CheckQuotaArrow(Children(Control<ProgressBar>("WeekBar")).OfType<SegmentedVisual>().Single(),zoom);
         foreach(string state in new[]{"normal","stale","failed","querying"}) {
             activeReading=state=="querying";queryFailed=state=="failed";snapshot.Time=state=="stale" ? now.AddMinutes(-6) : now;localReadWarning="";Render();window.UpdateLayout();
             var refresh=Control<Button>("RefreshButton");if((string)refresh.Tag!=state) throw new Exception("Refresh status color state failed.");
@@ -2028,17 +2135,49 @@ class QuotaWidget
             Theme.Colors=palette;ApplyTheme();
             foreach(bool en in new[]{false,true}) foreach(double scale in new[]{0.6,1.0,1.5}) foreach(bool full in new[]{false,true}) {
                 SelectLanguage(en);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
-                var marker=Control<ProgressBar>(full && scale>=textThreshold ? "WeekMarker" : "CompactWeekMarker");marker.ApplyTemplate();
+                var marker=Control<ProgressBar>(full && scale>=textThreshold ? "WeekBar" : "CompactWeekBar");marker.ApplyTemplate();
                 var visual=Children(marker).OfType<SegmentedVisual>().Single();
-                var markerBitmap=new RenderTargetBitmap((int)Math.Ceiling(marker.ActualWidth),(int)Math.Ceiling(marker.ActualHeight),96,96,PixelFormats.Pbgra32);markerBitmap.Render(visual);
-                var shapes=FlattenDrawings(VisualTreeHelper.GetDrawing(visual)).OfType<GeometryDrawing>().ToArray();
-                double tip=marker.ActualHeight-7;
-                if(shapes.Length!=2 || shapes.Any(shape=>shape.Geometry.Bounds.Top<tip-0.001) || Math.Abs(shapes.Single(shape=>shape.Geometry is StreamGeometry).Geometry.Bounds.Top-tip)>0.001) throw new Exception("Weekly reference arrow extends inside quota.");
+                CheckQuotaArrow(visual,scale);
                 SavePreview(Path.Combine(folder,"preset-"+i+(en ? "-en" : "-zh")+"-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
             }
         }
+        Theme.Colors=Theme.Preset(0);SelectLanguage(false);baseWidth=280;SetExpanded(false);ApplyTheme();
+        foreach(double scale in new[]{0.4,1.0,1.5}) {
+            snapshot.Time=now;SetZoom(scale);window.UpdateLayout();
+            var root=Control<Border>("Root");var bar=Control<ProgressBar>("CompactWeekBar");
+            var originalPoint=bar.TranslatePoint(new Point(0,0),window);double originalWidth=bar.ActualWidth;
+            if(root.BorderThickness.Left!=1) throw new Exception("Normal outline not restored.");
+            if(scale==1) SavePreview(Path.Combine(folder,"fresh-100.png"));
+            snapshot.Time=now.AddMinutes(-6);Render();window.UpdateLayout();
+            var warningPoint=bar.TranslatePoint(new Point(0,0),window);
+            if(Math.Abs((root.BorderThickness.Left-1)*scale-1)>0.001 || Math.Abs(warningPoint.X-originalPoint.X)>1 || Math.Abs(warningPoint.Y-originalPoint.Y)>1 || Math.Abs(bar.ActualWidth-originalWidth)>1) throw new Exception("Warning outline size/layout regression.");
+            SavePreview(Path.Combine(folder,"warning-"+(int)(scale*100)+".png"));
+            snapshot.Time=now;Render();window.UpdateLayout();if(root.BorderThickness.Left!=1) throw new Exception("Warning outline persisted after fresh data.");
+        }
         Theme.Colors=original;ApplyTheme();
-        File.WriteAllText(report,"PASS: four distinct green/blue/amber/light palettes; bilingual settings cards and custom color groups, preview/save/cancel behavior; text contrast >=4.5, icon/marker >=3; exact weekly timer decreases each minute independently of unchanged day-sized text and daily arrow; arrow tip on quota bottom and all marker geometry below quota at60/100/150% in both modes.\r\n"+string.Join("\r\n",notes)+"\r\nNo network queries or user preference writes. Physical mouse clicks and persisted-preference reload not exercised. Previous layout/refresh checks reused.\r\n");
+        File.WriteAllText(report,"PASS: two light, one medium and one dark color presets; bilingual cards/custom groups and preview/save/cancel behavior; text contrast >=4.5, icon/marker >=3; independent weekly timer/day text/reference; outlined down-facing top arrow with minimum size; stale outline adds1 physical px at40/100/150%, preserves quota placement/width within1 layout pixel and restores normal thickness when fresh.\r\n"+string.Join("\r\n",notes)+"\r\nNo network queries or user preference writes. Physical mouse clicks and persisted-preference reload not exercised. Previous layout/refresh checks reused.\r\n");
+    }
+    static void CheckQuotaArrow(SegmentedVisual visual,double scale) {
+        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(visual.ActualWidth),(int)Math.Ceiling(visual.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(visual);
+        var drawings=FlattenDrawings(VisualTreeHelper.GetDrawing(visual)).ToArray();
+        var arrow=drawings.OfType<GeometryDrawing>().Single(item=>item.Geometry is StreamGeometry);
+        var bounds=arrow.Geometry.GetRenderBounds(arrow.Pen);var body=arrow.Geometry.Bounds;
+        if(bounds.Top < -0.001 || bounds.Top*scale>1.001 || bounds.Bottom>visual.ActualHeight+0.001 || body.Width*scale<6.99 || body.Height*scale<4.49) throw new Exception("Arrow top/minimum-size boundary failed.");
+        var figure=arrow.Geometry.GetFlattenedPathGeometry().Figures.Single();var points=((PolyLineSegment)figure.Segments.Single()).Points;
+        if(points[0].Y!=figure.StartPoint.Y || points[1].Y<=figure.StartPoint.Y) throw new Exception("Arrow is not pointing down.");
+        int textIndex=Array.FindIndex(drawings,item=>item is GlyphRunDrawing);
+        if(textIndex>=0 && Array.IndexOf(drawings,arrow)>textIndex) throw new Exception("Arrow drawn over captions.");
+    }
+    static void CheckArrowLayout(string report) {
+        var now=DateTimeOffset.UtcNow;snapshot=new Snapshot {Time=now,Live=true,Hour=new Limit {Remaining=72,Reset=now.ToUnixTimeSeconds()+14340},Week=new Limit {Remaining=49,Reset=now.ToUnixTimeSeconds()+495540}};
+        window.Opacity=0;window.ShowActivated=false;window.ShowInTaskbar=false;window.Left=-10000;window.Top=-10000;window.Show();toolbarTop=false;settingsVisits=2;
+        foreach(bool light in new[]{false,true}) foreach(bool en in new[]{false,true}) foreach(double width in new[]{100.0,280.0}) foreach(double scale in new[]{0.4,0.6,1.0,1.5}) foreach(bool full in new[]{false,true}) {
+            Theme.Colors=Theme.Preset(light ? 3 : 0);baseWidth=width;SelectLanguage(en);SetZoom(scale);SetExpanded(full);window.UpdateLayout();
+            var bar=Control<ProgressBar>(full && scale>=textThreshold ? "WeekBar" : "CompactWeekBar");bar.ApplyTemplate();var visual=Children(bar).OfType<SegmentedVisual>().Single();
+            foreach(double position in new[]{0.0,3.0/7,6.0/7}) {bar.DataContext=position;window.UpdateLayout();CheckQuotaArrow(visual,scale);}
+            if(width==280 && !en) SavePreview(Path.Combine(Path.GetDirectoryName(report),(light ? "light" : "dark")+"-"+(int)(scale*100)+(full ? "-expanded" : "-compact")+".png"));
+        }
+        File.WriteAllText(report,"PASS: down-facing weekly arrow at quota top, no upward protrusion; physical size at least7px wide/4.5px tall at40/60/100/150%, widths100/280, both modes/languages and light/dark themes; day-reference endpoints clamped inside bar; outline visible and captions rendered above arrow. Existing daily positions, quota ticks and precise countdown remain unchanged.\r\nOffline WPF checks/previews; no network queries or user preference writes. Physical mouse use not exercised.\r\n");
     }
     static IEnumerable<Drawing> FlattenDrawings(Drawing drawing) {
         if(drawing==null) yield break;
@@ -2052,7 +2191,7 @@ class QuotaWidget
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check" || args[0]=="--colors-check" || args[0]=="--ticks-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check" || args[0]=="--colors-check" || args[0]=="--ticks-check" || args[0]=="--arrow-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -2064,6 +2203,7 @@ class QuotaWidget
             if (!checking) { LoadLanguage(); LoadZoom(); LoadDisplayOptions(); LoadTheme(); LoadToolbarPreference(); LoadSettingsGuide(); }
             ConfigureInteraction();
             ApplyTheme();
+            if(args.Length==2 && args[0]=="--arrow-check") {CheckArrowLayout(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--ticks-check") {CheckWeeklyTicks(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--colors-check") {CheckColorSettings(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--aligned-check") {CheckAlignedLayout(args[1]);window.Close();return 0;}
