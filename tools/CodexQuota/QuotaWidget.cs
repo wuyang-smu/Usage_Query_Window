@@ -27,7 +27,6 @@ public class SegmentedVisual : FrameworkElement
     public static readonly DependencyProperty DayMarkerProperty = DependencyProperty.Register("DayMarker", typeof(double), typeof(SegmentedVisual), new FrameworkPropertyMetadata(-1.0, FrameworkPropertyMetadataOptions.AffectsRender));
     public double DayMarker {get {return (double)GetValue(DayMarkerProperty);} set {SetValue(DayMarkerProperty,value);} }
     public static readonly DependencyProperty MarkerWidthProperty=DependencyProperty.RegisterAttached("MarkerWidth",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(2.0,FrameworkPropertyMetadataOptions.AffectsRender));
-    public static readonly DependencyProperty MarkerOutsideProperty=DependencyProperty.RegisterAttached("MarkerOutside",typeof(bool),typeof(SegmentedVisual),new FrameworkPropertyMetadata(false,FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty MarkerScaleProperty=DependencyProperty.RegisterAttached("MarkerScale",typeof(double),typeof(SegmentedVisual),new FrameworkPropertyMetadata(1.0,FrameworkPropertyMetadataOptions.AffectsRender));
     public string Caption { get { return (string)GetValue(CaptionProperty); } set { SetValue(CaptionProperty, value); } }
     public double Value { get { return (double)GetValue(ValueProperty); } set { SetValue(ValueProperty, value); } }
@@ -91,7 +90,7 @@ public class SegmentedVisual : FrameworkElement
         double scale=Math.Max(0.4,(double)GetValue(MarkerScaleProperty));
         double half=Math.Min(Math.Max(5,3.5/scale)*0.75,width/4), x=Math.Max(half+0.75/scale,Math.Min(width-half-0.75/scale,width*DayMarker));
         var color=Theme.Brush("weekMarker");
-        bool outside=(bool)GetValue(MarkerOutsideProperty);
+        bool outside=Kind.EndsWith("center") && (!string.IsNullOrEmpty(Caption) || !string.IsNullOrEmpty(Label));
         double markerHeight=Math.Max(5,4.5/scale)*0.75;
         double top=outside ? -markerHeight : 0.5/scale;
         double tip=outside ? 0 : Math.Min(height-0.5/scale,top+markerHeight);
@@ -156,16 +155,15 @@ class QuotaWidget
             visual.SetBinding(SegmentedVisual.LabelProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.LabelProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.DayMarkerProperty, new Binding("DataContext") { RelativeSource = RelativeSource.TemplatedParent });
             visual.SetBinding(SegmentedVisual.MarkerWidthProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerWidthProperty),RelativeSource=RelativeSource.TemplatedParent});
-            visual.SetBinding(SegmentedVisual.MarkerOutsideProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerOutsideProperty),RelativeSource=RelativeSource.TemplatedParent});
             visual.SetBinding(SegmentedVisual.MarkerScaleProperty,new Binding {Path=new PropertyPath("(0)",SegmentedVisual.MarkerScaleProperty),RelativeSource=RelativeSource.TemplatedParent});
             bar.DataContext=-1.0;
             bar.Template = new ControlTemplate(typeof(ProgressBar)) { VisualTree = visual };
         }
     }
     static double zoom = 1;
-    static double textThreshold = 0.6, baseWidth = 180;
+    static double textThreshold = 0.8, baseWidth = 180;
     static DateTimeOffset lastActiveCompleted = DateTimeOffset.MinValue;
-    class DisplayOptions { public double TextThreshold = 0.6, Width = 180; }
+    class DisplayOptions { public double TextThreshold = 0.8, Width = 180; }
     static string DisplayOptionsFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"display.json"); }
     static void ApplyDisplayOptions(DisplayOptions options) {
         if (options == null) return;
@@ -292,7 +290,7 @@ class QuotaWidget
         }
         Control<ProgressBar>("WeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,2.0);
         Control<ProgressBar>("CompactWeekMarker").SetValue(SegmentedVisual.MarkerWidthProperty,Control<ProgressBar>("CompactWeekBar").Uid.Length==0 ? 2.0 : 3.5);
-        foreach(string name in new[]{"WeekBar","CompactWeekBar"}) {Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerScaleProperty,zoom);Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerOutsideProperty,!mini);}
+        foreach(string name in new[]{"WeekBar","CompactWeekBar"}) {Control<ProgressBar>(name).SetValue(SegmentedVisual.MarkerScaleProperty,zoom);}
         if (mini) Control<TextBlock>("EmptyUsage").Visibility = Visibility.Collapsed;
     }
     static string Text(string chinese, string en) { return english ? en : chinese; }
@@ -1930,7 +1928,7 @@ class QuotaWidget
         snapshot=new Snapshot {Time=now}; if(ShouldAutoQuery(now.AddMinutes(10))) throw new Exception("Unavailable live windows queried endlessly.");
         var serializer=new JavaScriptSerializer();
         ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>("{}"));
-        if(textThreshold!=0.6 || baseWidth!=180) throw new Exception("Old display settings compatibility failed.");
+        if(textThreshold!=0.8 || baseWidth!=180) throw new Exception("Old display settings compatibility failed.");
         ApplyDisplayOptions(serializer.Deserialize<DisplayOptions>(serializer.Serialize(new DisplayOptions {TextThreshold=0.6,Width=480})));
         if(textThreshold!=0.6 || baseWidth!=480) throw new Exception("Display preference roundtrip failed.");
         ApplyDisplayOptions(new DisplayOptions {TextThreshold=2,Width=1});
