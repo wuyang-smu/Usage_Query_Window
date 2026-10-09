@@ -57,13 +57,13 @@ public class SegmentedVisual : FrameworkElement
             new Typeface(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), Kind.Contains("narrow") ? 11 : 13, Brushes.WhiteSmoke, VisualTreeHelper.GetDpi(this).PixelsPerDip) : null;
         double textLeft = caption == null ? -1 : Kind.Contains("right") ? width-caption.Width-6 : (width-caption.Width)/2;
         double textRight = caption == null ? -1 : (width+caption.Width)/2;
-        var bigMark = new Pen(Theme.Brush("ticks"),(detail ? 2 : 3.5)-(time || Kind.Contains("week") ? 0 : 0.5)-(time ? 0 : 0.75));
+        var bigMark = new Pen(Theme.Brush("ticks"),2);
         for (int i = 1; i < boundaries.Length - 1; i++) {
             double x = width * boundaries[i] / 100;
             context.DrawLine(bigMark,new Point(x,fullTicks ? 0 : detail ? height*0.5 : height*0.75),new Point(x,height));
         }
         if(!time) {
-            var smallMark=new Pen(Theme.Brush("ticks"),detail && !Kind.Contains("week") ? 1.5 : 2);
+            var smallMark=new Pen(Theme.Brush("ticks"),2);
             for(int percent=10;percent<100;percent+=20) {
                 double x=width*percent/100;
                 context.DrawLine(smallMark,new Point(x,detail ? height*0.75 : height*0.875),new Point(x,height));
@@ -2096,12 +2096,12 @@ class QuotaWidget
             bool time=kind.StartsWith("time"),week=kind.Contains("week"),detail=kind.Contains("detail");
             int majorCount=time && week ? 6 : 4;
             if(lines.Length!=(!time ? 9 : majorCount)) throw new Exception("Tick count incorrect: "+kind);
-            double majorWidth=(detail ? 2 : 3.5)-(time || week ? 0 : 0.5)-(time ? 0 : 0.75);
+            double majorWidth=2;
             for(int i=0;i<lines.Length;i++) {
                 var line=(LineGeometry)lines[i].Geometry;bool minor=i>=majorCount;
                 double expectedX=minor ? (10+(i-majorCount)*20)*2 : (time && week ? (i+1)*200.0/7 : (i+1)*40);
                 double expectedY=minor ? (detail ? 15 : 17.5) : time ? 0 : detail ? 10 : 15;
-                double minorWidth=detail && !week ? 1.5 : 2;
+                double minorWidth=2;
                 if(Math.Abs(lines[i].Pen.Thickness-(minor ? minorWidth : majorWidth))>0.001 || Math.Abs(line.StartPoint.X-expectedX)>0.001 || Math.Abs(line.StartPoint.Y-expectedY)>0.001 || line.EndPoint.Y!=20) throw new Exception("Tick geometry incorrect: "+kind);
             }
         }
