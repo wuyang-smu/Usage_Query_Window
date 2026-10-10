@@ -1,4 +1,4 @@
-param([ValidateSet('default','10','4')][string]$Variant = 'default', [string]$OutputDirectory)
+﻿param([ValidateSet('default','10','4')][string]$Variant = 'default', [string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $destination = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $PSScriptRoot '../../artifacts/CodexQuota' }
@@ -44,7 +44,7 @@ $arguments = @('/nologo','/target:winexe',"/out:$output", "/win32icon:$iconPath"
     "/resource:$iconPath,Widget.ico", "/resource:$PSScriptRoot/Widget.xaml,Widget.xaml",
     "/reference:$framework/WPF/WindowsBase.dll", "/reference:$framework/WPF/PresentationCore.dll",
     "/reference:$framework/WPF/PresentationFramework.dll", '/reference:System.Xaml.dll',
-    '/reference:System.Web.Extensions.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', (Join-Path $PSScriptRoot 'Theme.cs'), (Join-Path $PSScriptRoot 'QuotaWidget.cs'))
+    '/reference:System.Web.Extensions.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', (Join-Path $PSScriptRoot 'AppServices.cs'), (Join-Path $PSScriptRoot 'StartupSettings.cs'), (Join-Path $PSScriptRoot 'RefreshPolicy.cs'), (Join-Path $PSScriptRoot 'Theme.cs'), (Join-Path $PSScriptRoot 'QuotaWidget.cs'))
 if ($Variant -ne 'default') { $arguments += '/define:SEGMENT' + $Variant }
 & (Join-Path $framework 'csc.exe') @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }

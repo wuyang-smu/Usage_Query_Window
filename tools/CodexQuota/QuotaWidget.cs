@@ -108,7 +108,7 @@ public class SegmentedVisual : FrameworkElement
     }
 }
 
-class QuotaWidget
+partial class QuotaWidget
 {
     class Limit { public double Remaining; public long Reset; }
     class Snapshot {
@@ -162,11 +162,13 @@ class QuotaWidget
     }
     static double zoom = 1;
     static double textThreshold = 0.8, baseWidth = 180;
-    static DateTimeOffset lastActiveCompleted = DateTimeOffset.MinValue;
-    class DisplayOptions { public double TextThreshold = 0.8, Width = 180; }
+    static DateTimeOffset lastActiveCompleted = DateTimeOffset.MinValue, localFailureSince = DateTimeOffset.MinValue;
+    static double widgetOpacity=1;
+    class DisplayOptions { public double TextThreshold = 0.8, Width = 180, Opacity = 1; }
     static string DisplayOptionsFile() { return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"display.json"); }
     static void ApplyDisplayOptions(DisplayOptions options) {
         if (options == null) return;
+        if (!double.IsNaN(options.Opacity) && !double.IsInfinity(options.Opacity)) widgetOpacity=Math.Max(0.3,Math.Min(1,options.Opacity));
         if (!double.IsNaN(options.TextThreshold) && !double.IsInfinity(options.TextThreshold)) textThreshold=Math.Max(0.4,Math.Min(1.5,options.TextThreshold));
         if (!double.IsNaN(options.Width) && !double.IsInfinity(options.Width)) baseWidth=Math.Max(100,Math.Min(480,options.Width));
     }
@@ -176,7 +178,7 @@ class QuotaWidget
     }
     static void SaveDisplayOptions() {
         if(checking) return;
-        try { Directory.CreateDirectory(Path.GetDirectoryName(DisplayOptionsFile())); File.WriteAllText(DisplayOptionsFile(),new JavaScriptSerializer().Serialize(new DisplayOptions {TextThreshold=textThreshold,Width=baseWidth})); }
+        try { Directory.CreateDirectory(Path.GetDirectoryName(DisplayOptionsFile())); File.WriteAllText(DisplayOptionsFile(),new JavaScriptSerializer().Serialize(new DisplayOptions {TextThreshold=textThreshold,Width=baseWidth,Opacity=widgetOpacity})); }
         catch(IOException) {} catch(UnauthorizedAccessException) {}
     }
     static double TextWidth(string text, double size, FontWeight weight) {
@@ -239,6 +241,7 @@ class QuotaWidget
         Render(); SaveZoom();
     }
     static void ApplyScaleLayout() {
+        window.Opacity=widgetOpacity;
         bool mini = zoom <= textThreshold;
         bool narrowExpanded = false;
         bool compact = noExpand || !expanded || mini;
@@ -579,6 +582,8 @@ class QuotaWidget
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,14), Foreground = Brushes.LightSlateGray }; panel.Children.Add(note);
         var thresholdLabel=new TextBlock();
         var commitThreshold=AddNumberSetting(panel,thresholdLabel,40,150,textThreshold*100,"%",value=>{textThreshold=value/100;Render();SaveDisplayOptions();});
+        var opacityLabel=new TextBlock();
+        AddNumberSetting(panel,opacityLabel,30,100,widgetOpacity*100,"%",value=>{widgetOpacity=value/100;window.Opacity=widgetOpacity;SaveDisplayOptions();});
         var widthLabel=new TextBlock();
         var commitWidth=AddNumberSetting(panel,widthLabel,100,480,baseWidth,"px",value=>{baseWidth=value;Render();SaveDisplayOptions();});
         var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
@@ -641,7 +646,9 @@ class QuotaWidget
             groupTarget.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,12),Child=content});
         };
         group(languageHeading,new UIElement[]{languageLabel,language});
-        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag});
+        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag,opacityLabel,(UIElement)opacityLabel.Tag});
+        var startupHeading=new TextBlock();Action startupLabels;var startupPanel=CreateStartupSettings(out startupLabels);
+        group(startupHeading,new UIElement[]{startupPanel});
         groupTarget=toolbarPanel;group(toolbarHeading,toolbarElements);
         var arrowNote=new TextBlock {Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke};
         groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,arrowNote,colors});panel.Children.Add(actions);
@@ -661,10 +668,12 @@ class QuotaWidget
         Action labels = () => {
             arrowNote.Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day");
             dialog.Title = Text("系统设置", "Settings"); languageLabel.Text = Text("语言（Language）", "Language");
+            startupHeading.Text=Text("启动与更新","Startup and updates");startupLabels();
             settingsHeading.Text=dialog.Title;languageHeading.Text=Text("语言（Language）","Language");sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("配色","Colors");toolbarHeading.Text=Text("工具栏","Toolbar");
             scaleLabel.Text = Text("缩放比例", "Scale");
             note.Text = Text("鼠标置于悬浮窗上，用滚轮缩放。低于 60% 时建议仅查看条形。", "Point at the widget and scroll to resize. Below 60%, bars are recommended.");
             thresholdLabel.Text=Text("文字隐藏阈值", "Hide text below");
+            opacityLabel.Text=Text("窗口不透明度","Window opacity");
             widthLabel.Text=Text("窗口宽度（100% 缩放时）", "Window width (at 100% scale)");
             colors.Content = Text("自定义配色…", "Custom colors…"); done.Content = Text("完成", "Done");
             generalPage.Header=Text("常规","General");toolbarPage.Header=Text("工具栏","Toolbar");colorPage.Header=Text("配色","Colors");
@@ -1644,15 +1653,6 @@ class QuotaWidget
         if(days<=0 || days>7) return -1;
         return Math.Max(0,Math.Min(6,Math.Ceiling(days)-1))/7;
     }
-    static bool DataIsStale() { return DataIsStaleAt(DateTimeOffset.UtcNow); }
-    static bool DataIsStaleAt(DateTimeOffset now) {
-        if (snapshot == null) return false;
-        return (snapshot.Hour != null && (now - (snapshot.HourTime == default(DateTimeOffset) ? snapshot.Time : snapshot.HourTime)).TotalMinutes >= 5)
-            || (snapshot.Week != null && (now - (snapshot.WeekTime == default(DateTimeOffset) ? snapshot.Time : snapshot.WeekTime)).TotalMinutes >= 5);
-    }
-    static bool ShouldAutoQuery(DateTimeOffset now) {
-        return !reading && (snapshot == null || DataIsStaleAt(now)) && (now-lastActiveCompleted).TotalMinutes>=5;
-    }
     static void UpdateRefreshStatus() {
         string state=activeReading ? "querying" : queryFailed || localReadWarning.Length>0 ? "failed" : snapshot==null || DataIsStale() ? "stale" : "normal";
         var button=Control<Button>("RefreshButton");
@@ -1672,7 +1672,7 @@ class QuotaWidget
         UpdateRefreshStatus();
         Control<TextBlock>("EmptyUsage").Visibility = snapshot == null || (snapshot.Hour == null && snapshot.Week == null) ? Visibility.Visible : Visibility.Collapsed;
         Control<TextBlock>("EmptyUsage").Text = Text("暂无额度数据", "No usage limits available");
-        bool warning = queryFailed || localReadWarning.Length > 0 || DataIsStale();
+        bool warning = queryFailed;
         Control<TextBlock>("Updated").Foreground = Theme.Brush(warning ? "alert" : "status");
         // Keep the warning visible even when zoom hides captions and the toolbar.
         Control<Border>("Root").BorderBrush = Theme.Brush(warning ? "alert" : "windowBorder");
@@ -1696,39 +1696,6 @@ class QuotaWidget
             + Text("打开、点击刷新及数据过期时主动查询；每 15 秒读取本地记录，自动查询间隔至少 5 分钟。\n数据时间：", "Queries on launch, refresh and stale data; local reads every 15 seconds, automatic queries at least 5 minutes apart.\nData timestamp: ") + snapshot.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             + "\n" + localReadWarning;
         ResizeWidget();
-    }
-    static async void Refresh(bool active) {
-        if (reading) return;
-        reading = true;
-        activeReading=active;
-        Control<Button>("RefreshButton").IsEnabled = false;
-        UpdateRefreshStatus();
-        if (active) Control<TextBlock>("Updated").Text = Text("正在查询账户额度…", "Querying account usage…");
-        try {
-            bool fallback = false;
-            try {
-                var candidate = await Task.Run(() => active ? QuerySnapshot() : ReadSnapshot());
-                var selected = NewerSnapshot(snapshot, candidate);
-                if (!active && candidate != null && snapshot != null && selected == snapshot && candidate.Time > snapshot.Time
-                    && ((candidate.Hour != null && snapshot.Hour != null && candidate.Hour.Remaining < snapshot.Hour.Remaining)
-                    || (candidate.Week != null && snapshot.Week != null && candidate.Week.Remaining < snapshot.Week.Remaining)))
-                    localReadWarning = "Newer local usage rejected by reset/time protection. Please query the account.";
-                snapshot = selected;
-                if (active) { queryFailed = false; queryError = ""; localReadWarning = ""; }
-            } catch (Exception ex) {
-                if (active) { queryFailed = true; queryError = ex.Message; fallback = true; }
-                else localReadWarning = "Local read failed: " + ex.GetType().Name;
-            }
-            if (fallback) {
-                try { snapshot = NewerSnapshot(snapshot, await Task.Run(() => ReadSnapshot())); } catch (Exception) { }
-            }
-        }
-        finally {
-            if(active) lastActiveCompleted=DateTimeOffset.UtcNow;
-            activeReading=false;
-            reading = false; Control<Button>("RefreshButton").IsEnabled = true; Render();
-            if(!active && ShouldAutoQuery(DateTimeOffset.UtcNow)) Refresh(true);
-        }
     }
     static void SavePreview(string path) {
         window.UpdateLayout();
@@ -2254,7 +2221,7 @@ class QuotaWidget
             var clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
             clockTimer.Tick += (s, e) => Render();
             window.Closed += (s, e) => { scanTimer.Stop(); clockTimer.Stop(); };
-            window.Loaded += (s, e) => { Refresh(true); UpdateSettingsHint(); if (!window.IsMouseOver) collapseTimer.Start(); };
+            window.Loaded += (s, e) => { if(!checking) InitializeUpdates(); Refresh(true); UpdateSettingsHint(); if (!window.IsMouseOver) collapseTimer.Start(); };
             Render(); scanTimer.Start(); clockTimer.Start();
             new Application().Run(window);
             return 0;
