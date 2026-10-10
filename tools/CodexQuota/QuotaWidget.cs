@@ -15,6 +15,7 @@ using System.Windows.Media.Imaging;
 using System.Threading;
 using System.Diagnostics;
 using System.Windows.Data;
+using System.Windows.Media.Animation;
 
 public class SegmentedVisual : FrameworkElement
 {
@@ -405,8 +406,12 @@ partial class QuotaWidget
         } catch (IOException) { } catch (UnauthorizedAccessException) { }
         return highlight;
     }
+    static bool settingsPulseActive;
     static void UpdateSettingsHint() {
         var button=Control<Button>("SettingsButton");
+        var glyph=(Viewbox)button.Content;
+        if(settingsVisits==0 && !settingsPulseActive) {glyph.BeginAnimation(UIElement.OpacityProperty,new DoubleAnimation(1,0.4,TimeSpan.FromSeconds(1.5)) {AutoReverse=true,RepeatBehavior=RepeatBehavior.Forever});settingsPulseActive=true;}
+        else if(settingsVisits>0 && settingsPulseActive) {glyph.BeginAnimation(UIElement.OpacityProperty,null);glyph.Opacity=1;settingsPulseActive=false;}
         if(settingsVisits==0) {
             var red=(Color)ColorConverter.ConvertFromString("#E5484D");
             button.Resources["ToolbarNormal"]=new SolidColorBrush(red);
@@ -445,7 +450,7 @@ partial class QuotaWidget
 <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static Slider.IncreaseLarge}' Focusable='False'><RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Height='4' Background='#46536B' CornerRadius='2'/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
 <Track.Thumb><Thumb Width='12' Height='12'><Thumb.Template><ControlTemplate TargetType='Thumb'><Border Background='#DCE8FA' CornerRadius='6'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
 </Track></Grid></ControlTemplate></Setter.Value></Setter></Style>
-<Style TargetType='TabItem'><Setter Property='Foreground' Value='#AAB3C2'/><Setter Property='Background' Value='#252D3B'/><Setter Property='Padding' Value='18,8'/><Setter Property='Margin' Value='0,0,6,0'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='TabItem'><Border x:Name='Tab' Background='{TemplateBinding Background}' BorderBrush='Transparent' BorderThickness='1' CornerRadius='5' Padding='{TemplateBinding Padding}'><ContentPresenter ContentSource='Header' HorizontalAlignment='Center'/></Border><ControlTemplate.Triggers><Trigger Property='IsSelected' Value='True'><Setter TargetName='Tab' Property='Background' Value='#426DA7'/><Setter Property='Foreground' Value='#FFFFFF'/></Trigger><Trigger Property='Tag' Value='guide'><Setter Property='Foreground' Value='#FFB580'/><Setter TargetName='Tab' Property='BorderBrush' Value='#FFB580'/></Trigger><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Tab' Property='BorderBrush' Value='#78BEFF'/><Setter TargetName='Tab' Property='BorderThickness' Value='1'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+<Style TargetType='TabItem'><Setter Property='Foreground' Value='#AAB3C2'/><Setter Property='Background' Value='Transparent'/><Setter Property='Padding' Value='18,8'/><Setter Property='Margin' Value='0,0,6,0'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='TabItem'><Border x:Name='Tab' SnapsToDevicePixels='True' UseLayoutRounding='True' Background='#252D3B' BorderBrush='Transparent' BorderThickness='1' CornerRadius='8' Padding='{TemplateBinding Padding}'><Grid><ContentPresenter ContentSource='Header' HorizontalAlignment='Center' Margin='0,0,8,0'/><Ellipse x:Name='GuideDot' Fill='#E5484D' Width='5' Height='5' HorizontalAlignment='Right' VerticalAlignment='Top' Margin='0,-2,0,0' Visibility='Collapsed' IsHitTestVisible='False'/></Grid></Border><ControlTemplate.Triggers><Trigger Property='IsSelected' Value='True'><Setter TargetName='Tab' Property='Background' Value='#426DA7'/><Setter Property='Foreground' Value='#FFFFFF'/></Trigger><Trigger Property='Tag' Value='guide'><Setter TargetName='GuideDot' Property='Visibility' Value='Visible'/></Trigger><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Tab' Property='BorderBrush' Value='#78BEFF'/><Setter TargetName='Tab' Property='BorderThickness' Value='1'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 </ResourceDictionary>");
     }
     static Brush PaletteBrush(Dictionary<string,string> palette,string key) {return new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette[key]));}
@@ -453,12 +458,13 @@ partial class QuotaWidget
     static List<ColorCard> customColorCards=new List<ColorCard>();
     static string ColorCardsFile() {return Path.Combine(Path.GetDirectoryName(PreferenceFile()),"color-cards.json");}
     static List<ColorCard> AvailableColorCards() {
-        var cards=new List<ColorCard>();
+        var cards=new List<ColorCard> {new ColorCard {Id="builtin-default",Name="默认配色",Colors=Theme.Defaults()}};
         for(int i=0;i<4;i++) cards.Add(new ColorCard {Id="builtin-"+i,Builtin=i,Colors=Theme.Preset(i)});
         cards.AddRange(customColorCards);return cards;
     }
-    static string ColorCardName(ColorCard card) {return card.Builtin>=0 ? Theme.PresetName(card.Builtin,english) : card.Name;}
+    static string ColorCardName(ColorCard card) {return card.Id=="builtin-default" ? Text("默认配色","Default colors") : card.Builtin>=0 ? Theme.PresetName(card.Builtin,english) : card.Name;}
     static bool ColorCardNameExists(string name) {
+        if(string.Equals(name,"默认配色",StringComparison.OrdinalIgnoreCase) || string.Equals(name,"Default colors",StringComparison.OrdinalIgnoreCase)) return true;
         return AvailableColorCards().Any(card=>card.Builtin>=0
             ? string.Equals(Theme.PresetName(card.Builtin,false),name,StringComparison.OrdinalIgnoreCase) || string.Equals(Theme.PresetName(card.Builtin,true),name,StringComparison.OrdinalIgnoreCase)
             : string.Equals(card.Name,name,StringComparison.OrdinalIgnoreCase));
@@ -531,7 +537,7 @@ partial class QuotaWidget
             bar.Children.Add(new Border {Background=PaletteBrush(palette,"quotaGreen")});
             var caption=new TextBlock {Text="72% · 6d",Foreground=PaletteBrush(palette,"caption"),FontSize=11,FontWeight=FontWeights.Bold,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
             Grid.SetColumnSpan(caption,2);bar.Children.Add(caption);
-            var arrow=new System.Windows.Shapes.Path {Data=Geometry.Parse("M 0,0 L 8,0 L 4,5 Z"),Fill=PaletteBrush(palette,"weekMarker"),Stroke=PaletteBrush(palette,"caption"),StrokeThickness=0.7,Width=9,Height=6,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,0,14,0)};
+            var arrow=new System.Windows.Shapes.Path {Tag="PresetWeekArrow",Data=Geometry.Parse("M 0,0 L 8,0 L 4,5 Z"),Fill=PaletteBrush(palette,"weekMarker"),Stroke=PaletteBrush(palette,"caption"),StrokeThickness=0.7,Width=9,Height=6,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,0,14,0)};
             Grid.SetColumnSpan(arrow,2);bar.Children.Add(arrow);
             content.Children.Add(new Border {Child=bar,BorderBrush=PaletteBrush(palette,"barBorder"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(3)});
             var swatches=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(0,7,0,0)};
@@ -586,12 +592,13 @@ partial class QuotaWidget
         AddNumberSetting(panel,opacityLabel,30,100,widgetOpacity*100,"%",value=>{widgetOpacity=value/100;window.Opacity=widgetOpacity;SaveDisplayOptions();});
         var widthLabel=new TextBlock();
         var commitWidth=AddNumberSetting(panel,widthLabel,100,480,baseWidth,"px",value=>{baseWidth=value;Render();SaveDisplayOptions();});
-        var colors = new Button { Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,16) }; panel.Children.Add(colors);
+        var colors = new Button { Padding = new Thickness(10,5,10,5), Margin = new Thickness(0) }; panel.Children.Add(colors);
         LoadColorCards();
         Button[] presetCards=null;Grid presetGrid=null;
-        var colorNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=Brushes.LightSlateGray};
-        var cardViewport=new ScrollViewer {Height=196,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,CanContentScroll=false,PanningMode=PanningMode.VerticalOnly,Margin=new Thickness(0,0,0,10)};
-        EnableCardDragging(cardViewport);
+        var colorNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,4),Foreground=Brushes.LightSlateGray};
+        var cardViewport=new ScrollViewer {Height=208,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,CanContentScroll=false,PanningMode=PanningMode.VerticalOnly,Margin=new Thickness(0,0,0,10)};
+        var slimResources=(ResourceDictionary)XamlReader.Parse(@"<ResourceDictionary xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'><Style TargetType='ScrollBar'><Setter Property='Width' Value='2'/><Setter Property='Background' Value='Transparent'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ScrollBar'><Grid Background='Transparent'><Track x:Name='PART_Track' Orientation='Vertical' IsDirectionReversed='True'><Track.DecreaseRepeatButton><RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0' Focusable='False'/></Track.DecreaseRepeatButton><Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType='Thumb'><Border x:Name='Handle' Background='#657080' CornerRadius='3'/><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Handle' Property='Background' Value='#929DAD'/></Trigger><Trigger Property='IsDragging' Value='True'><Setter TargetName='Handle' Property='Background' Value='#929DAD'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0' Focusable='False'/></Track.IncreaseRepeatButton></Track></Grid></ControlTemplate></Setter.Value></Setter></Style></ResourceDictionary>");
+        cardViewport.Padding=new Thickness(8,0,8,0);cardViewport.Resources=slimResources;EnableCardDragging(cardViewport);
         Action syncColors=()=>UpdatePresetCards(presetCards);
         Action reloadCards=()=>{
             double previousOffset=cardViewport.VerticalOffset;
@@ -631,39 +638,60 @@ partial class QuotaWidget
         panel.Children.Clear();
         var settingsHeading=new TextBlock {FontSize=20,FontWeight=FontWeights.Bold,Margin=new Thickness(0,0,0,16)};panel.Children.Add(settingsHeading);
         var generalPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};var toolbarPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};var colorPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};
-        var pages=new TabControl {Background=dialog.Background,BorderThickness=new Thickness(0)};
+        var startupTabPanel=new StackPanel {Margin=new Thickness(0,10,0,0)};
+        var startupPage=new TabItem {Content=new ScrollViewer {Content=startupTabPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled},Padding=new Thickness(8)};
+        var pages=new TabControl {Background=Brushes.Transparent,BorderThickness=new Thickness(0)};
+        // A plain header row avoids native TabPanel selection offsets/clipping.
+        pages.Template=(ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='TabControl'><Grid ClipToBounds='False' SnapsToDevicePixels='True'><Grid.RowDefinitions><RowDefinition Height='Auto'/><RowDefinition Height='*'/></Grid.RowDefinitions><ItemsPresenter Grid.Row='0' Margin='0,0,2,0' ClipToBounds='False'/><ContentPresenter x:Name='PART_SelectedContentHost' Grid.Row='1' ContentSource='SelectedContent' Margin='0' /></Grid></ControlTemplate>");
+        var headerPanel=new FrameworkElementFactory(typeof(StackPanel));headerPanel.SetValue(StackPanel.OrientationProperty,Orientation.Horizontal);pages.ItemsPanel=new ItemsPanelTemplate(headerPanel);
         var generalPage=new TabItem {Content=new ScrollViewer {Content=generalPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
         var toolbarPage=new TabItem {Content=new ScrollViewer {Content=toolbarPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
-        var colorPage=new TabItem {Content=new ScrollViewer {Content=colorPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
-        pages.Items.Add(generalPage);pages.Items.Add(toolbarPage);pages.Items.Add(colorPage);pages.SelectedIndex=0;panel.Children.Add(pages);
-        language.Margin=new Thickness(0);scaleRow.Margin=new Thickness(0,0,0,8);note.Margin=new Thickness(0,4,0,8);
+        var colorOuter=new ScrollViewer {Content=colorPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+        var colorPage=new TabItem {Content=colorOuter};
+        dialog.SizeChanged+=(s,e)=>colorOuter.VerticalScrollBarVisibility=dialog.ActualHeight+1<dialog.Height ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        pages.Items.Add(generalPage);pages.Items.Add(toolbarPage);pages.Items.Add(colorPage);pages.Items.Add(startupPage);
+        foreach(TabItem page in pages.Items) {
+            page.Padding=new Thickness(6,8,6,8);page.Margin=new Thickness(0,0,4,0);
+            page.PreviewMouseLeftButtonDown+=(s,e)=>{var point=e.GetPosition(page);if(point.X>=0 && point.X<=page.ActualWidth && point.Y>=0 && point.Y<=page.ActualHeight) AcknowledgeTabGuide(page);};
+        }
+        pages.SelectedIndex=0;panel.Children.Add(pages);
+        language.Margin=new Thickness(0);scaleRow.Margin=new Thickness(0,0,0,4);note.Margin=new Thickness(0,2,0,4);
+        foreach(var label in new[]{scaleLabel,thresholdLabel,widthLabel,opacityLabel,languageLabel}) label.Margin=new Thickness(0,0,0,3);
+        foreach(var label in new[]{thresholdLabel,widthLabel,opacityLabel}) {var row=(Grid)label.Tag;row.Margin=new Thickness(0,0,0,4);foreach(var inputBox in row.Children.OfType<TextBox>()) inputBox.Padding=new Thickness(5,3,5,3);}
         ((Grid)thresholdLabel.Tag).Margin=new Thickness(0,0,0,8);((Grid)widthLabel.Tag).Margin=new Thickness(0);
         StackPanel groupTarget=generalPanel;
         Action<TextBlock,UIElement[]> group=(heading,elements)=>{
             heading.Foreground=new SolidColorBrush(Color.FromRgb(145,167,199));heading.FontWeight=FontWeights.Bold;heading.Margin=new Thickness(0,0,0,6);groupTarget.Children.Add(heading);
-            var content=new StackPanel {Margin=new Thickness(10)};
+            var content=new StackPanel {Margin=new Thickness(8)};
             foreach(var element in elements) content.Children.Add(element);
-            groupTarget.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,12),Child=content});
+            groupTarget.Children.Add(new Border {Background=new SolidColorBrush(Color.FromRgb(37,45,59)),CornerRadius=new CornerRadius(8),Margin=new Thickness(0,0,0,8),Child=content});
         };
-        group(languageHeading,new UIElement[]{languageLabel,language});
-        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,widthLabel,(UIElement)widthLabel.Tag,opacityLabel,(UIElement)opacityLabel.Tag});
-        var startupHeading=new TextBlock();Action startupLabels;var startupPanel=CreateStartupSettings(out startupLabels);
-        group(startupHeading,new UIElement[]{startupPanel});
+        languageHeading.Visibility=Visibility.Collapsed;group(languageHeading,new UIElement[]{languageLabel,language});
+        var thresholdNote=new TextBlock {TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,2,0,4)};
+        group(sizeHeading,new UIElement[]{scaleLabel,scaleRow,note,thresholdLabel,(UIElement)thresholdLabel.Tag,thresholdNote,widthLabel,(UIElement)widthLabel.Tag,opacityLabel,(UIElement)opacityLabel.Tag});
+        var startupHeading=new TextBlock();Action startupLabels;var startupPanel=CreateStartupSettings(guide,out startupLabels);
+        groupTarget=startupTabPanel;group(startupHeading,new UIElement[]{startupPanel});
         groupTarget=toolbarPanel;group(toolbarHeading,toolbarElements);
         var arrowNote=new TextBlock {Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),Foreground=guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke};
-        groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,arrowNote,colors});panel.Children.Add(actions);
+        Button[] exampleCards;var exampleGrid=CreatePresetCards(index=>{},out exampleCards);var exampleCard=exampleCards[3];exampleGrid.Children.Remove(exampleCard);exampleCard.Width=140;exampleCard.Height=88;exampleCard.Margin=new Thickness(0);exampleCard.IsHitTestVisible=false;
+        var example=new Grid {Width=140,Height=88};example.Children.Add(exampleCard);
+        var annotationLayer=new Canvas {IsHitTestVisible=false};var ring=new System.Windows.Shapes.Ellipse {Width=20,Height=20,Stroke=Brushes.OrangeRed,StrokeThickness=1.5};annotationLayer.Children.Add(ring);example.Children.Add(annotationLayer);
+        // Follow the rendered triangle, rather than assuming card padding or font metrics.
+        example.LayoutUpdated+=(s,e)=>{var triangle=Children(exampleCard).OfType<System.Windows.Shapes.Path>().FirstOrDefault(item=>(string)item.Tag=="PresetWeekArrow");if(triangle==null || !triangle.IsArrangeValid) return;var bounds=triangle.TransformToAncestor(example).TransformBounds(triangle.RenderedGeometry.Bounds);double left=bounds.Left+bounds.Width/2-ring.Width/2,top=bounds.Top+bounds.Height/2-ring.Height/2;if(Canvas.GetLeft(ring)!=left) Canvas.SetLeft(ring,left);if(Canvas.GetTop(ring)!=top) Canvas.SetTop(ring,top);};
+        var compactExample=new Viewbox {Width=112,Height=71,Stretch=Stretch.Uniform,Child=example,HorizontalAlignment=HorizontalAlignment.Left};
+        var arrowExplanation=new Grid {Margin=new Thickness(0,0,0,8)};arrowExplanation.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(120)});arrowExplanation.ColumnDefinitions.Add(new ColumnDefinition());arrowExplanation.Children.Add(compactExample);Grid.SetColumn(arrowNote,1);arrowNote.VerticalAlignment=VerticalAlignment.Center;arrowExplanation.Children.Add(arrowNote);
+        groupTarget=colorPanel;group(appearanceHeading,new UIElement[]{cardViewport,colorNote,arrowExplanation,colors});panel.Children.Add(actions);
         // Let the current page shrink within the screen instead of creating one
         // long settings document. Each page owns its own overflow scrolling.
         var settingsRoot=new DockPanel {Margin=new Thickness(18)};
         panel.Children.Remove(settingsHeading);panel.Children.Remove(pages);panel.Children.Remove(actions);
         DockPanel.SetDock(settingsHeading,Dock.Top);DockPanel.SetDock(actions,Dock.Bottom);
         settingsRoot.Children.Add(settingsHeading);settingsRoot.Children.Add(actions);settingsRoot.Children.Add(pages);dialog.Content=settingsRoot;
-        foreach(var item in new TextBlock[]{languageLabel,note,placementLabel}) if(guide) item.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
+        foreach(var item in new TextBlock[]{languageLabel,note,thresholdLabel,thresholdNote,placementLabel,orderLabel}) if(guide) item.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) noExpandOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) toolbarOption.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));
         if(guide) {
-            foreach(var page in new[]{generalPage,toolbarPage,colorPage}) page.Tag="guide";
-            colors.Foreground=new SolidColorBrush(Color.FromRgb(255,181,128));colors.BorderBrush=colors.Foreground;
+            foreach(var page in new[]{generalPage,toolbarPage,colorPage,startupPage}) page.Tag="guide";
         }
         Action labels = () => {
             arrowNote.Text=Text("周参考箭头：当天的本周建议用量","Weekly reference arrow: suggested weekly usage for the current day");
@@ -671,13 +699,15 @@ partial class QuotaWidget
             startupHeading.Text=Text("启动与更新","Startup and updates");startupLabels();
             settingsHeading.Text=dialog.Title;languageHeading.Text=Text("语言（Language）","Language");sizeHeading.Text=Text("大小与显示","Size and display");appearanceHeading.Text=Text("配色","Colors");toolbarHeading.Text=Text("工具栏","Toolbar");
             scaleLabel.Text = Text("缩放比例", "Scale");
-            note.Text = Text("鼠标置于悬浮窗上，用滚轮缩放。低于 60% 时建议仅查看条形。", "Point at the widget and scroll to resize. Below 60%, bars are recommended.");
-            thresholdLabel.Text=Text("文字隐藏阈值", "Hide text below");
+            note.Text = Text("鼠标置于悬浮窗上，用滚轮缩放。", "Point at the widget and scroll to resize.");
+            thresholdLabel.Text=Text("文字隐藏阈值", "Text hiding threshold");
+            thresholdNote.Text=Text("缩放比例 ≤ 此阈值时隐藏条内文字，仅显示条形与刻度。","At or below this scale, hide in-bar text and retain bars and ticks.");
             opacityLabel.Text=Text("窗口不透明度","Window opacity");
             widthLabel.Text=Text("窗口宽度（100% 缩放时）", "Window width (at 100% scale)");
             colors.Content = Text("自定义配色…", "Custom colors…"); done.Content = Text("完成", "Done");
+            startupPage.Header=Text("启动与更新","Startup & updates");
             generalPage.Header=Text("常规","General");toolbarPage.Header=Text("工具栏","Toolbar");colorPage.Header=Text("配色","Colors");
-            colorNote.Text=Text("点击色卡立即应用并保存。上下拖动、滚轮或滚动条查看其余色卡。自定义颜色可另存为新色卡。","Click a card to apply and save. Drag vertically, scroll or use the scrollbar to see more. Save custom colors as a new card.");syncColors();
+            colorNote.Text=Text("点击色卡应用并保存；拖动或滚轮查看更多。自定义配色可另存色卡。","Click to apply and save. Drag or scroll for more. Save custom colors as cards.");syncColors();
             noExpandOption.Content=Text("不展开模式","No expansion mode"); noExpandOption.ToolTip=Text("鼠标进入时只显示工具栏，额度条保持收起布局。","Hover shows only the toolbar; usage bars retain their compact layout.");
             toolbarOption.Content = Text("收起时保留工具栏", "Keep toolbar when collapsed");
             toolbarOption.ToolTip=Text("关闭后，只有展开窗口时才显示工具栏。","When disabled, the toolbar appears only while expanded.");
@@ -722,14 +752,14 @@ partial class QuotaWidget
         colors.Click += (s,e) => {OpenAppearance(null,guide);reloadCards();};
         done.Click += (s,e) => { commit(); commitThreshold(); commitWidth(); dialog.Close(); };
         try {
-            if (checking) {
+            if (checking && !settingsFocusedCheck) {
                 var initialColors=new Dictionary<string,string>(Theme.Colors);
                 for(int i=0;i<4;i++) {
                     presetCards[i].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     if(Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Preset(i)[key])) throw new Exception("Immediate card selection failed.");
                 }
                 Theme.Colors=initialColors;ApplyTheme();syncColors();
-                if(pages.Items.Count!=3 || generalPanel.Children.OfType<Border>().Count()!=2 || toolbarPanel.Children.OfType<Border>().Count()!=1 || colorPanel.Children.OfType<Border>().Count()!=1 || cardViewport.Height!=196
+                if(pages.Items.Count!=3 || generalPanel.Children.OfType<Border>().Count()!=2 || toolbarPanel.Children.OfType<Border>().Count()!=1 || colorPanel.Children.OfType<Border>().Count()!=1 || cardViewport.Height!=208
                     || languageLabel.Text!=Text("语言（Language）","Language")) throw new Exception("Settings pages / card viewport failed.");
                 bool guidanceShown=note.Foreground.ToString()=="#FFFFB580";
                 if(guidanceShown!=guide || ((SolidColorBrush)toolbarOption.Foreground).Color!=((SolidColorBrush)(guide ? new SolidColorBrush(Color.FromRgb(255,181,128)) : Brushes.WhiteSmoke)).Color) throw new Exception("Settings guide visibility failed.");
@@ -777,6 +807,37 @@ partial class QuotaWidget
                 var bitmap=new RenderTargetBitmap((int)dialog.Width,(int)dialog.Height-32,96,96,PixelFormats.Pbgra32);bitmap.Render(settingsRoot);
                 var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var stream=File.Create(settingsPreviewPath))encoder.Save(stream);
                 SavePanelPreview(presetGrid,dialog.Background,338,Path.Combine(Path.GetDirectoryName(settingsPreviewPath),english ? "preset-cards-en.png" : "preset-cards-zh.png"));
+            } else if(settingsFocusedCheck) {
+                Exception failure=null;
+                dialog.ContentRendered+=(s,e)=>{
+                    try {
+                        dialog.UpdateLayout();double originalWidth=dialog.ActualWidth,originalHeight=dialog.ActualHeight;
+                        foreach(TabItem page in pages.Items) {
+                            pages.SelectedItem=page;dialog.UpdateLayout();page.ApplyTemplate();
+                            var dot=(System.Windows.Shapes.Ellipse)page.Template.FindName("GuideDot",page);
+                            var tabBorder=(Border)page.Template.FindName("Tab",page);if(tabBorder.CornerRadius.TopLeft!=8 || page.Background.ToString()!="#00FFFFFF") throw new Exception("Rounded tab template mismatch");
+                            if(dot==null || (dot.Visibility==Visibility.Visible)!=guide) throw new Exception("Tab red-dot guide mismatch");
+                            if(page.Foreground.ToString()=="#FFFFB580") throw new Exception("Inherited tab highlight remained");
+                            var header=(ContentPresenter)Children(page).OfType<ContentPresenter>().First(item=>item.ContentSource=="Header");
+                            if(header.ActualWidth+header.Margin.Left+header.Margin.Right+0.5<header.DesiredSize.Width) throw new Exception("Tab header clipped");
+                            if(dialog.ActualWidth!=originalWidth || dialog.ActualHeight!=originalHeight) throw new Exception("Tab changes window size");
+                            var bounds=tabBorder.TransformToAncestor(pages).TransformBounds(new Rect(0,0,tabBorder.ActualWidth,tabBorder.ActualHeight));if(bounds.Left<0 || bounds.Right>pages.ActualWidth+0.5) throw new Exception("Tab border clipped by header container");
+                            if(page==startupPage && settingsVisits==1) {var bitmap=new RenderTargetBitmap((int)Math.Ceiling(dialog.ActualWidth),(int)Math.Ceiling(dialog.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(dialog);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var output=File.Create(Path.Combine(Path.GetDirectoryName(settingsFocusedReport),"tabs-actual.png"))) encoder.Save(output);}
+                        }
+                        pages.SelectedItem=generalPage;dialog.UpdateLayout();
+                        pages.SelectedItem=colorPage;dialog.UpdateLayout();
+                        var fifth=presetCards[4];var fifthTop=fifth.TransformToAncestor(cardViewport).Transform(new Point(0,0)).Y;if(cardViewport.ViewportHeight-196<11 || fifthTop>=cardViewport.ActualHeight) throw new Exception("Fifth card not partially visible");
+                        var scrollStyle=(Style)cardViewport.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)];if((double)scrollStyle.Setters.OfType<Setter>().First(item=>item.Property==FrameworkElement.WidthProperty).Value!=2) throw new Exception("Scrollbar width mismatch");
+                        if(((ScrollViewer)colorPage.Content).ScrollableHeight>1) throw new Exception("Colors page requires outer scrolling");pages.SelectedItem=generalPage;dialog.UpdateLayout();
+                        if(((ScrollViewer)generalPage.Content).ScrollableHeight>1) throw new Exception("General page requires scrolling: "+((ScrollViewer)generalPage.Content).ScrollableHeight);
+                        foreach(var label in new[]{widthLabel,opacityLabel}) if(label.Foreground.ToString()=="#FFFFB580") throw new Exception("Unrequested label highlighted");
+                        if(colors.Foreground.ToString()=="#FFFFB580") throw new Exception("Custom colors highlighted");
+                        if((thresholdNote.Foreground.ToString()=="#FFFFB580")!=guide || (note.Foreground.ToString()=="#FFFFB580")!=guide) throw new Exception("Guide fields mismatch");
+                        var defaults=AvailableColorCards()[0];if(defaults.Id!="builtin-default" || Theme.Keys.Any(key=>defaults.Colors[key]!=Theme.Defaults()[key])) throw new Exception("Default card mismatch");
+                        if(!ApplyColorCard(defaults) || Theme.Keys.Any(key=>Theme.Colors[key]!=Theme.Defaults()[key])) throw new Exception("Default card apply failed");
+                    } catch(Exception ex) {failure=ex;} finally {dialog.Close();}
+                };
+                dialog.ShowDialog();if(failure!=null) throw failure;
             } else {
                 dialog.WindowStartupLocation = WindowStartupLocation.Manual;
                 PositionSettings(dialog,dialog.Height);
@@ -786,6 +847,9 @@ partial class QuotaWidget
         } finally { settingsOpen = false; settingsWindow = null; if (!window.IsMouseOver) collapseTimer.Start(); }
     }
     static string settingsPreviewPath;
+    static bool settingsFocusedCheck;
+    static string settingsFocusedReport;
+    static void AcknowledgeTabGuide(TabItem page) {page.Tag=null;}
     static void CheckToolbarLayout(string report) {
         window.Opacity=0; window.ShowActivated=false; window.ShowInTaskbar=false; window.Left=-10000; window.Top=-10000;
         long now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -936,9 +1000,11 @@ partial class QuotaWidget
         double above = Math.Max(0,window.Top-gap-topLeft.Y);
         double below = Math.Max(0,bottomRight.Y-window.Top-window.Height-gap);
         bool putAbove = height <= above || (height > below && above >= below);
-        dialog.MaxHeight = Math.Max(80,putAbove ? above : below);
+        // Keep the configured height when the screen can fit it; widget position must not shrink settings.
+        dialog.MaxHeight = Math.Max(80,bottomRight.Y-topLeft.Y-2*gap);
         height = Math.Min(height,dialog.MaxHeight);
-        dialog.Top = putAbove ? window.Top-height-gap : window.Top+window.Height+gap;
+        double preferred=putAbove ? window.Top-height-gap : window.Top+window.Height+gap;
+        dialog.Top=Math.Max(topLeft.Y+gap,Math.Min(bottomRight.Y-height-gap,preferred));
     }
     static void CheckRealizedLayout(string report) {
         // Realize the native window without displaying it or querying an account.
@@ -2166,7 +2232,7 @@ partial class QuotaWidget
             if (args.Length == 2 && args[0] == "--snapshot-check") {
                 CheckSnapshotSelection(args[1]); return 0;
             }
-            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check" || args[0]=="--colors-check" || args[0]=="--ticks-check" || args[0]=="--arrow-check");
+            checking = args.Length == 2 && (args[0] == "--check" || args[0] == "--ui-check" || args[0] == "--layout-check" || args[0] == "--hover-check" || args[0] == "--toolbar-check" || args[0] == "--reader-check" || args[0] == "--display-check" || args[0]=="--aligned-check" || args[0]=="--colors-check" || args[0]=="--ticks-check" || args[0]=="--arrow-check" || args[0]=="--settings-guide-check");
             using (var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Widget.xaml"))
                 window = (Window)XamlReader.Load(source);
             ConfigureSegments();
@@ -2178,6 +2244,7 @@ partial class QuotaWidget
             if (!checking) { LoadLanguage(); LoadZoom(); LoadDisplayOptions(); LoadTheme(); LoadToolbarPreference(); LoadSettingsGuide(); }
             ConfigureInteraction();
             ApplyTheme();
+            if(args.Length==2 && args[0]=="--settings-guide-check") {settingsFocusedCheck=true;settingsFocusedReport=args[1];settingsVisits=0;for(int visit=0;visit<3;visit++) OpenSettings();File.WriteAllText(args[1],"PASS: four fixed-size pages; General has no overflow; first two visits show four red dots and scoped guides; third clears guides; default card applies exact default palette. No user preference writes or account queries.");window.Close();return 0;}
             if(args.Length==2 && args[0]=="--arrow-check") {CheckArrowLayout(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--ticks-check") {CheckWeeklyTicks(args[1]);window.Close();return 0;}
             if(args.Length==2 && args[0]=="--colors-check") {CheckColorSettings(args[1]);window.Close();return 0;}
